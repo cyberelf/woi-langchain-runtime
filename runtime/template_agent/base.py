@@ -134,8 +134,7 @@ class BaseAgentTemplate(ABC):
         self.template_config = agent_data.template_config
         self.system_prompt = agent_data.system_prompt
         self.conversation_config = agent_data.conversation_config or {}
-        self.toolsets = agent_data.toolsets
-        self.selected_tool_sets = agent_data.selected_tool_sets
+        self.toolsets = agent_data.toolsets  # Selected toolsets
         self.llm_config_id = agent_data.llm_config_id
         
         # Execution metrics

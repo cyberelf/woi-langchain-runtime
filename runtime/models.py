@@ -78,8 +78,7 @@ class AgentCreateRequest(BaseModel):
     template_config: Dict[str, Any] = Field(default_factory=dict, description="Template-specific configuration")
     system_prompt: str = Field(..., description="System prompt for the agent")
     conversation_config: Optional[ConversationConfig] = Field(default=None, description="Conversation configuration")
-    toolsets: List[str] = Field(default_factory=list, description="Available toolsets")
-    selected_tool_sets: List[str] = Field(default_factory=list, description="Selected toolsets")
+    toolsets: List[str] = Field(default_factory=list, description="Selected toolsets")
     llm_config_id: str = Field(..., description="LLM configuration identifier")
 
 
