@@ -2,23 +2,19 @@
 
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer
 
 from .auth import runtime_auth
-from .agents import agent_manager
 from .models import (
     AgentCreateRequest, AgentResponse, ValidationResult,
     ChatCompletionRequest, ChatCompletionResponse, ChatCompletionChunk,
     SchemaResponse, HealthResponse, HealthCheckItem, HealthMetrics,
     ErrorResponse
 )
-from .schema import get_runtime_schema
 from .config import settings
-from . import __version__
 
 # Create router
 router = APIRouter()
@@ -30,6 +26,16 @@ security = HTTPBearer()
 startup_time = time.time()
 
 
+def get_runtime(request: Request):
+    """Get runtime instance from app state."""
+    if not hasattr(request.app.state, 'runtime'):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Runtime not initialized"
+        )
+    return request.app.state.runtime
+
+
 @router.post("/v1/agents", status_code=status.HTTP_201_CREATED)
 async def create_agent(
     agent_data: AgentCreateRequest,
@@ -38,33 +44,18 @@ async def create_agent(
 ) -> AgentResponse:
     """Create a new agent."""
     try:
-        # Validate agent configuration
-        validation_warnings = []
+        runtime = get_runtime(request)
         
-        # Check if template configuration is valid
-        if agent_data.type.value == "task":
-            task_config = agent_data.template_config.get("taskSteps", {})
-            if not task_config.get("steps"):
-                validation_warnings.append("No task steps defined, using default steps")
-        
-        elif agent_data.type.value == "custom":
-            code_config = agent_data.template_config.get("codeSource", {})
-            if not code_config.get("content"):
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="Custom agents require code content"
-                )
-        
-        # Create the agent
-        agent = agent_manager.create_agent(agent_data)
+        # Create the agent using the new template system
+        agent = runtime.agent_factory.create_agent(agent_data)
         
         return AgentResponse(
             success=True,
-            agent_id=agent.id,
+            agent_id=agent_data.id,
             message="Agent created successfully",
             validation_results=ValidationResult(
                 valid=True,
-                warnings=validation_warnings
+                warnings=[]
             )
         )
     
@@ -89,36 +80,21 @@ async def update_agent(
 ) -> AgentResponse:
     """Update an existing agent."""
     try:
+        runtime = get_runtime(request)
+        
         # Ensure the agent ID matches
         agent_data.id = agent_id
         
-        # Validate agent configuration
-        validation_warnings = []
-        
-        # Check if template configuration is valid
-        if agent_data.type.value == "task":
-            task_config = agent_data.template_config.get("taskSteps", {})
-            if not task_config.get("steps"):
-                validation_warnings.append("No task steps defined, using default steps")
-        
-        elif agent_data.type.value == "custom":
-            code_config = agent_data.template_config.get("codeSource", {})
-            if not code_config.get("content"):
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="Custom agents require code content"
-                )
-        
-        # Update the agent
-        agent = agent_manager.update_agent(agent_id, agent_data)
+        # Update the agent using the new template system
+        agent = runtime.agent_factory.update_agent(agent_id, agent_data)
         
         return AgentResponse(
             success=True,
-            agent_id=agent.id,
+            agent_id=agent_id,
             message="Agent updated successfully",
             validation_results=ValidationResult(
                 valid=True,
-                warnings=validation_warnings
+                warnings=[]
             )
         )
     
@@ -148,7 +124,12 @@ async def delete_agent(
 ) -> AgentResponse:
     """Delete an agent."""
     try:
-        agent_manager.delete_agent(agent_id)
+        runtime = get_runtime(request)
+        
+        # Delete the agent using the new template system
+        success = runtime.agent_factory.destroy_agent(agent_id)
+        if not success:
+            raise ValueError(f"Agent {agent_id} not found")
         
         return AgentResponse(
             success=True,
@@ -175,16 +156,10 @@ async def get_schema(
 ) -> SchemaResponse:
     """Get runtime schema."""
     try:
-        # Check for schema version compatibility
-        client_version = request.headers.get("X-Schema-Version")
-        current_version = "1.2.0"
+        runtime = get_runtime(request)
         
-        if client_version and client_version != current_version:
-            # In a real implementation, you would check for breaking changes
-            # For now, we'll just return the current schema
-            pass
-        
-        return get_runtime_schema()
+        # Get schema from template manager
+        return runtime.template_manager.generate_schema()
     
     except Exception as e:
         raise HTTPException(
@@ -198,80 +173,80 @@ async def chat_completions(
     request_data: ChatCompletionRequest,
     request: Request,
     _: bool = Depends(runtime_auth)
-) -> Any:
-    """Execute agent with OpenAI-compatible chat completions."""
+) -> ChatCompletionResponse:
+    """Execute agent chat completion."""
     try:
-        # Get the agent
-        agent = agent_manager.get_agent(request_data.model)
+        runtime = get_runtime(request)
         
-        # Validate message length
-        total_length = sum(len(msg.content) for msg in request_data.messages)
-        if total_length > settings.max_message_length:
+        # Get the agent
+        agent = runtime.agent_factory.get_agent(request_data.model)
+        if not agent:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Message length exceeds limit of {settings.max_message_length}"
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Agent {request_data.model} not found"
             )
         
-        # Execute the agent
+        # Handle streaming response
         if request_data.stream:
-            # Return streaming response
             async def generate_stream():
                 try:
                     async for chunk in agent.stream_execute(
                         messages=request_data.messages,
                         temperature=request_data.temperature,
                         max_tokens=request_data.max_tokens,
-                        metadata=request_data.metadata
+                        metadata=getattr(request_data, 'metadata', None)
                     ):
-                        yield f"data: {chunk.json()}\n\n"
+                        yield f"data: {chunk.model_dump_json()}\n\n"
+                    
+                    # Send final empty chunk
                     yield "data: [DONE]\n\n"
+                
                 except Exception as e:
                     error_chunk = ChatCompletionChunk(
                         id=f"chatcmpl-error",
+                        object="chat.completion.chunk",
                         created=int(time.time()),
                         model=request_data.model,
-                        choices=[{
-                            "index": 0,
-                            "delta": {},
-                            "finish_reason": "error"
-                        }]
+                        choices=[],
+                        error=str(e)
                     )
-                    yield f"data: {error_chunk.json()}\n\n"
-                    yield "data: [DONE]\n\n"
+                    yield f"data: {error_chunk.model_dump_json()}\n\n"
             
             return StreamingResponse(
                 generate_stream(),
                 media_type="text/plain",
-                headers={"Cache-Control": "no-cache"}
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Content-Type": "text/plain; charset=utf-8"
+                }
             )
+        
         else:
-            # Return regular response
+            # Non-streaming response
             response = await agent.execute(
                 messages=request_data.messages,
                 stream=False,
                 temperature=request_data.temperature,
                 max_tokens=request_data.max_tokens,
-                metadata=request_data.metadata
+                metadata=getattr(request_data, 'metadata', None)
             )
+            
+            # Update agent metrics
+            runtime.agent_factory.update_agent_metrics(
+                request_data.model,
+                execution_time=0.0,  # Would be calculated from actual execution time
+                error=False
+            )
+            
             return response
     
-    except ValueError as e:
-        if "not found" in str(e):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Agent not found: {request_data.model}"
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(e)
-            )
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Agent execution failed: {str(e)}"
+            detail=f"Failed to execute agent: {str(e)}"
         )
 
 
@@ -280,85 +255,92 @@ async def health_check(
     request: Request,
     _: bool = Depends(runtime_auth)
 ) -> HealthResponse:
-    """Health check endpoint."""
+    """Comprehensive health check."""
     try:
-        current_time = datetime.now().isoformat()
-        uptime = int(time.time() - startup_time)
+        runtime = get_runtime(request)
         
-        # Perform health checks
-        checks = {}
+        # Get health status from runtime
+        health_status = runtime.get_health_status()
         
-        # Check LLM proxy (simplified)
-        try:
-            # In a real implementation, you would ping the LLM proxy
-            checks["llm_proxy"] = HealthCheckItem(
+        # Calculate uptime
+        uptime_seconds = int(time.time() - startup_time)
+        
+        # Create health check items
+        health_items = [
+            HealthCheckItem(
+                service="runtime",
+                status="healthy" if health_status["initialized"] else "unhealthy",
+                details={"templates_loaded": health_status.get("templates_loaded", 0)}
+            ),
+            HealthCheckItem(
+                service="template_manager",
+                status="healthy" if health_status.get("templates_loaded", 0) > 0 else "degraded",
+                details={"template_count": health_status.get("templates_loaded", 0)}
+            ),
+            HealthCheckItem(
+                service="agent_factory",
                 status="healthy",
-                response_time_ms=150,
-                last_check=current_time
+                details={"total_agents": health_status.get("total_agents", 0)}
+            ),
+            HealthCheckItem(
+                service="scheduler",
+                status="healthy",
+                details={"active_agents": health_status.get("active_agents", 0)}
             )
-        except Exception:
-            checks["llm_proxy"] = HealthCheckItem(
-                status="unhealthy",
-                response_time_ms=None,
-                last_check=current_time
-            )
-        
-        # Check database (placeholder)
-        checks["database"] = HealthCheckItem(
-            status="healthy",
-            response_time_ms=5,
-            last_check=current_time
-        )
-        
-        # Check agent templates
-        checks["agent_templates"] = HealthCheckItem(
-            status="healthy",
-            response_time_ms=None,
-            last_check=current_time,
-            loaded_templates=3  # We have 3 templates
-        )
-        
-        # Get metrics
-        metrics_data = agent_manager.get_metrics()
-        metrics = HealthMetrics(
-            active_agents=metrics_data["active_agents"],
-            total_executions=metrics_data["total_executions"],
-            average_response_time_ms=metrics_data.get("average_response_time_ms", 0),
-            error_rate=metrics_data.get("error_rate", 0.0)
-        )
+        ]
         
         # Determine overall status
         overall_status = "healthy"
-        for check in checks.values():
-            if check.status != "healthy":
-                overall_status = "unhealthy"
-                break
+        if any(item.status == "unhealthy" for item in health_items):
+            overall_status = "unhealthy"
+        elif any(item.status == "degraded" for item in health_items):
+            overall_status = "degraded"
+        
+        # Create metrics
+        metrics = HealthMetrics(
+            uptime_seconds=uptime_seconds,
+            total_agents=health_status.get("total_agents", 0),
+            active_agents=health_status.get("active_agents", 0),
+            templates_loaded=health_status.get("templates_loaded", 0)
+        )
         
         return HealthResponse(
             status=overall_status,
-            timestamp=current_time,
-            version=__version__,
-            uptime_seconds=uptime,
-            last_sync=None,  # Would be set by sync process
-            checks=checks,
+            timestamp=datetime.now().isoformat(),
+            version="1.0.0",
+            checks=health_items,
             metrics=metrics
         )
     
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Health check failed: {str(e)}"
+        # Return degraded health if we can't get status
+        return HealthResponse(
+            status="unhealthy",
+            timestamp=datetime.now().isoformat(),
+            version="1.0.0",
+            checks=[
+                HealthCheckItem(
+                    service="runtime",
+                    status="unhealthy",
+                    details={"error": str(e)}
+                )
+            ],
+            metrics=HealthMetrics(
+                uptime_seconds=int(time.time() - startup_time),
+                total_agents=0,
+                active_agents=0,
+                templates_loaded=0
+            )
         )
 
 
-# Error handlers
 @router.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     """Handle HTTP exceptions."""
     return ErrorResponse(
         error="HTTP_ERROR",
         message=exc.detail,
-        details=None
+        status_code=exc.status_code
     )
 
 
@@ -367,6 +349,6 @@ async def general_exception_handler(request: Request, exc: Exception):
     """Handle general exceptions."""
     return ErrorResponse(
         error="INTERNAL_ERROR",
-        message="An internal error occurred",
-        details=None
+        message="An internal server error occurred",
+        details=str(exc) if settings.debug else None
     ) 

@@ -1,0 +1,61 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Feature Implementation Guide
+
+This guide outlines the process for implementing new features in the AI Platform.
+
+## Implementation Process
+
+### 1. Feature Planning
+- Document feature requirements in the appropriate section of `[REQUIREMENTS.md](mdc:REQUIREMENTS.md)`
+- Update `[IMPLEMENTATION_TRACKING.md](mdc:IMPLEMENTATION_TRACKING.md)` with the new feature and set status to 🟡 (In Progress)
+- Plan the data model changes required for the feature
+
+### 2. Schema Updates
+- Update Pydantic schemas in the backend
+- Ensure proper validation with `model_validator` for complex validations
+- Set appropriate default values for optional fields
+- Maintain backward compatibility when possible
+
+### 3. Database Model Changes
+- Update SQLAlchemy models to reflect schema changes
+- Follow the `model-code-consistency` rules
+- Add proper default values for new fields
+- Use appropriate column types and constraints
+
+### 4. API Implementation
+- Implement new API endpoints or update existing ones
+- Follow RESTful API principles
+- Ensure proper error handling
+- Document the API in `[API_SPECIFICATION.md](mdc:API_SPECIFICATION.md)`
+
+### 5. Testing
+- Create comprehensive test cases covering:
+  - Schema validation
+  - API functionality
+  - Edge cases and error conditions
+- Update existing tests that might be affected by your changes
+
+### 6. Documentation
+- Update `[IMPLEMENTATION_TRACKING.md](mdc:IMPLEMENTATION_TRACKING.md)` with the implementation details and set status to 🟢 (Completed)
+- Document any deviations from the requirements
+- Add a new entry to the "Recent Updates" section with date and detailed description
+
+## Example: Global LLM Configuration Implementation
+
+The recent transition from embedded LLM configurations to a global LLM configuration system demonstrates this process:
+
+1. **Planning**: Identified the need to decouple LLM configurations from agents
+2. **Schema Updates**: 
+   - Created `LLMConfig` database model and schema
+   - Added `llm_config_id` field to Agent schema
+   - Maintained backward compatibility in `AgentInDB`
+3. **API Implementation**: Created CRUD operations for global LLM configurations
+4. **Testing**: Updated all test cases to use the new schema
+5. **Documentation**: Added detailed descriptions to IMPLEMENTATION_TRACKING.md
+
+This implementation improved maintainability by centralizing LLM configurations and allowing agents to reference them rather than duplicating configuration data.
+

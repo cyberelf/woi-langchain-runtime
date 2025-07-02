@@ -1,0 +1,34 @@
+---
+description: 
+globs: */alembic/versions/*,alembic.ini
+alwaysApply: false
+---
+# Alembic Migration Rule
+
+## Core Principle
+**ALWAYS use Alembic commands for database migrations. NEVER edit migration version files manually.**
+
+## Essential Commands
+```bash
+# Create new migration
+alembic revision --autogenerate -m "description"
+
+# Apply migrations
+alembic upgrade head
+
+# Check current state
+alembic current
+
+# Handle multiple heads
+alembic merge -m "merge_description" head1 head2
+```
+
+## File References
+- Configuration: [alembic.ini](mdc:ai-platform-backend/alembic.ini)
+- Migration versions: [ai-platform-backend/alembic/versions/](mdc:ai-platform-backend/alembic/versions)
+- Database models: [app/db/models/](mdc:ai-platform-backend/app/db/models)
+
+## Emergency Only
+If migration state is corrupted, create corrective migrations instead of manual edits.
+
+

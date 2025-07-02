@@ -1,0 +1,32 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Project Tracking Guidelines
+
+Development progress must be tracked and aligned with requirements documentation:
+
+## Implementation Tracking
+- All progress must be documented in `[IMPLEMENTATION_TRACKING.md](mdc:IMPLEMENTATION_TRACKING.md)`
+- Update tracking document for each completed feature
+- Include status, completion date, and any notable challenges
+- Track both completed and pending tasks
+- Check for existing content before changing and make sure the file is consistant
+
+## Requirements Alignment
+- All implementations must align with `[REQUIREMENTS.md](mdc:REQUIREMENTS.md)`
+- Verify feature implementation against requirements
+- Document any deviations from requirements with justification
+- Keep requirements document as source of truth
+
+## API Consistancy
+- Frontend and backend should follow `@API_SPECIFICATION.md`
+- Update `@API_SPECIFICATION.md` when API changes
+
+## Progress Updates
+- Regular updates to tracking document
+- Clear status indicators for each component
+- Link implementations to specific requirements
+
+- Note any blockers or dependencies

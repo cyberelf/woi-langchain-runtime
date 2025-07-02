@@ -205,43 +205,87 @@ class TemplateManager:
 
 ### 4. Agent模板实现示例
 
+- FreeStyle Agent
 ```python
-# runtime/template_agent/conversation.py
-class ConversationAgent(BaseAgentTemplate):
-    """对话型Agent模板，Agent类即模板"""
+# runtime/template_agent/free_style.py
+class FreeStyleAgent(BaseAgentTemplate):
+    """灵活Agent模板，使用ReAct模式自由组合工具，执行特定的任务"""
     
     # 模板元数据（类变量）
-    template_name: str = "智能客服助手"
-    template_id: str = "customer-service-bot"
+    template_name: str = "自由的代理"
+    template_id: str = "free-style"
     template_version: str = "1.0.0"
-    template_description: str = "基础对话型智能体，适用于客服、咨询等场景"
-    agent_type: AgentType = AgentType.CONVERSATION
+    template_description: str = "灵活对话型智能体，适用于通用的简单任务"
+    agent_type: AgentType = AgentType.FREESTYLE
     
     # 配置模式（类变量）
     config_schema: Dict[str, Any] = {
-        "continuous": {
-            "type": "boolean",
-            "default": True,
-            "description": "是否启用连续对话模式",
+        "context": {
+            "type": "string",
+            "default": "",
+            "description": "智能体执行上下文，限制智能体的工作范围",
             "order": 0
         },
-        "historyLength": {
+        "task_buget": {
             "type": "integer",
-            "default": 10,
-            "minimum": 5,
+            "default": 20,
+            "minimum": 3,
             "maximum": 100,
-            "description": "对话历史长度",
+            "description": "每次任务最大工具调用次数",
             "order": 1
         }
     }
     
-    # 运行时需求（类变量）
-    runtime_requirements: Dict[str, Any] = {
-        "memory": "256MB",
-        "cpu": "0.1 cores",
-        "gpu": False,
-        "estimatedLatency": "< 2s"
+    
+    @classmethod
+    def validate_config(cls, config: Dict[str, Any]) -> ValidationResult:
+        """增强的配置验证（类方法）"""
+        result = super().validate_config(config)
+        # 添加特定验证逻辑
+        return result
+    
+    def _build_graph(self) -> StateGraph:
+        """构建对话流程图（实例方法）"""
+        # 实现LangGraph工作流
+        pass
+    
+    async def execute(self, messages, stream=False, ...) -> ChatCompletionResponse:
+        """执行对话（实例方法）"""
+        # 实现对话执行逻辑
+        pass
+```
+
+- RunBook Agent
+```python
+# runtime/template_agent/runbook.py
+class RunbookAgent(BaseAgentTemplate):
+    """逐步执行任务的Agent，根据配置的任务执行步骤执行，完成给定的任务"""
+    
+    # 模板元数据（类变量）
+    template_name: str = "逐步执行任务代理"
+    template_id: str = "runbook"
+    template_version: str = "1.0.0"
+    template_description: str = "逐步执行任务，适用于固定的任务流程执行，但支持一定的自主性，由Agent决定每一步是否完成"
+    agent_type: AgentType = AgentType.RUNBOOK
+    
+    # 配置模式（类变量）
+    config_schema: Dict[str, Any] = {
+        "context": {
+            "type": "string",
+            "default": "",
+            "description": "智能体执行上下文，限制智能体的工作范围",
+            "order": 0
+        },
+        "task_buget": {
+            "type": "integer",
+            "default": 20,
+            "minimum": 3,
+            "maximum": 100,
+            "description": "每次任务最大工具调用次数",
+            "order": 1
+        }
     }
+    
     
     @classmethod
     def validate_config(cls, config: Dict[str, Any]) -> ValidationResult:
@@ -287,7 +331,7 @@ class ConversationAgent(BaseAgentTemplate):
 4. 实现动态schema生成
 
 ### 第二阶段：模板系统
-1. 实现三种基础模板（conversation, task, custom）
+1. 实现两种基础模板（freetyle, workflow）
 2. 添加模板版本管理和兼容性检查
 3. 实现配置验证和错误处理
 4. 添加模板热重载功能

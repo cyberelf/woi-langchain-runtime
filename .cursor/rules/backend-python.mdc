@@ -1,0 +1,112 @@
+---
+description: 
+globs: *.py,ai-platform-backend/**/*
+alwaysApply: false
+---
+# Python Backend Standards
+
+The backend server implementation must adhere to these standards for consistency, maintainability, and type safety.
+
+## Technology Stack
+- Python 3.11 or higher required
+- Poetry for dependency management
+- FastAPI as the web framework
+- Pydantic for data validation and serialization
+- SQLAlchemy for database ORM (but decoupled via repositories)
+- Alembic for database migrations
+- Asyncio for asynchronous operations
+- FastAPI extensions:
+  - fastapi-users for user management
+  - fastapi-jwt-auth for authentication
+  - fastapi-mail for email services
+  - fastapi-cache for caching
+  - fastapi-limiter for rate limiting
+  - fastapi-pagination for pagination
+
+## Architecture Principles
+- Strict separation between API layer and business logic
+- Data access layer must be fully decoupled from business logic
+- Repository pattern required for database operations
+- Strategy pattern for file services and external integrations
+- Dependency injection for all services and repositories
+- No direct database or file operations in route handlers
+
+## FastAPI Framework
+- All API endpoints must use FastAPI framework
+- Routes must be organized using APIRouter for modular structure
+- Dependency injection required for all shared components
+- OpenAPI documentation must be enabled and properly configured
+- Use dedicated response models for all endpoints
+
+## Type Safety
+- All function parameters and return types must be explicitly annotated
+- Use Pydantic models for request/response bodies
+- Type hints must be used throughout the codebase
+- No use of `Any` type except in documented special cases
+- Utilize `Union`, `Optional`, and other typing extensions when appropriate
+- Run mypy for type checking as part of CI/CD pipeline
+
+## Pydantic Models
+- All data models must be defined as Pydantic BaseModel classes
+- Use strict type validation with `Config.extra = 'forbid'`
+- Implement comprehensive field validators
+- Use Pydantic's schema_extra for OpenAPI documentation
+- Define clear error responses using appropriate HTTP status codes
+- Separate database models from API models
+
+## Decoupling and Modularity
+- Use interface abstractions for all external services
+- Implement repository pattern for database operations
+- Service layer must not have direct database dependencies
+- File operations must be abstracted through interfaces
+- API routes must depend only on service interfaces, not implementations
+- Configuration must be injectable and environment-based
+- Use factories for creating service implementations
+
+## Error Handling
+- Implement centralized exception handlers
+- Use custom exception classes that extend FastAPI HTTPException
+- Provide clear error messages and appropriate status codes
+- Log all exceptions with proper context
+- Handle business logic errors separately from HTTP errors
+
+## Code Organization
+- Follow modular architecture with clear separation of concerns:
+  - `/api`: Route definitions and API models
+  - `/core`: Application core and business logic
+  - `/db`: Database models and migrations
+  - `/repositories`: Data access interfaces and implementations
+  - `/services`: Business logic services
+  - `/schemas`: Pydantic models for validation
+  - `/utils`: Utility functions
+- Place database models in dedicated schema files
+- Group related endpoints in router modules
+- Keep service implementations in separate modules from interfaces
+
+## Asynchronous Programming
+- Use async/await for all I/O bound operations
+- Implement proper connection pooling
+- Handle task cancellation appropriately
+- Use background tasks for long-running operations
+- Implement proper timeout handling
+
+## Testing
+- Implement comprehensive test coverage using pytest
+- Write unit tests for all Pydantic models and validators
+- Create integration tests for API endpoints
+- Use FastAPI TestClient for request validation testing
+- Mock all external dependencies in unit tests
+- Use dependency overrides for integration testing
+- Implement separate test database for integration tests
+
+## Code Quality
+- Follow PEP 8 style guide
+- Use descriptive variable, function, and class names
+- Document all functions and classes with docstrings
+- Handle exceptions gracefully
+- Avoid global variables
+- Use list comprehensions when appropriate
+
+
+
+

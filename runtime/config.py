@@ -4,6 +4,7 @@ import os
 from typing import Optional
 
 from pydantic import BaseSettings, Field
+from pydantic_settings import SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -40,9 +41,10 @@ class Settings(BaseSettings):
     debug: bool = Field(default=False, env="DEBUG")
     reload: bool = Field(default=False, env="RELOAD")
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=False
+    )
 
 
 # Global settings instance

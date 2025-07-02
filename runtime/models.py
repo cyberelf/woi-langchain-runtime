@@ -247,18 +247,17 @@ class SchemaResponse(BaseModel):
 
 class HealthCheckItem(BaseModel):
     """Individual health check item."""
+    service: str = Field(..., description="Service name")
     status: str = Field(..., description="Health status")
-    response_time_ms: Optional[int] = Field(default=None, description="Response time in milliseconds")
-    last_check: str = Field(..., description="Last check timestamp")
-    loaded_templates: Optional[int] = Field(default=None, description="Number of loaded templates")
+    details: Optional[Dict[str, Any]] = Field(default=None, description="Additional details")
 
 
 class HealthMetrics(BaseModel):
     """Health metrics."""
+    uptime_seconds: int = Field(..., description="Uptime in seconds")
+    total_agents: int = Field(..., description="Total number of agents")
     active_agents: int = Field(..., description="Number of active agents")
-    total_executions: int = Field(..., description="Total executions")
-    average_response_time_ms: int = Field(..., description="Average response time")
-    error_rate: float = Field(..., description="Error rate")
+    templates_loaded: int = Field(..., description="Number of templates loaded")
 
 
 class HealthResponse(BaseModel):
@@ -266,9 +265,7 @@ class HealthResponse(BaseModel):
     status: str = Field(..., description="Overall health status")
     timestamp: str = Field(..., description="Check timestamp")
     version: str = Field(..., description="Runtime version")
-    uptime_seconds: int = Field(..., description="Uptime in seconds")
-    last_sync: Optional[str] = Field(default=None, description="Last sync timestamp")
-    checks: Dict[str, HealthCheckItem] = Field(..., description="Individual health checks")
+    checks: List[HealthCheckItem] = Field(..., description="Individual health checks")
     metrics: HealthMetrics = Field(..., description="Runtime metrics")
 
 
@@ -285,4 +282,5 @@ class ErrorResponse(BaseModel):
     """Standard error response."""
     error: str = Field(..., description="Error code")
     message: str = Field(..., description="Human-readable error message")
-    details: Optional[ErrorDetail] = Field(default=None, description="Error details") 
+    status_code: Optional[int] = Field(default=None, description="HTTP status code")
+    details: Optional[str] = Field(default=None, description="Error details") 
