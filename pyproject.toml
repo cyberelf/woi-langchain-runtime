@@ -1,49 +1,55 @@
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.poetry]
+[project]
 name = "langchain-runtime"
 version = "0.1.0"
 description = "LangChain/LangGraph-based agent runtime service"
-authors = ["Development Team"]
+authors = [
+    {name = "Darren Zhao", email = "guangyuzhao@hillstonenet.com"}
+]
 readme = "README.md"
-packages = [{include = "runtime"}]
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic>=2.5.0",
+    "langchain>=0.1.0",
+    "langgraph>=0.0.20",
+    "openai>=1.3.0",
+    "httpx>=0.25.0",
+    "python-multipart>=0.0.6",
+    "semver>=3.0.0",
+    "pydantic-settings>=2.10.1",
+    "langchain-openai>=0.3.27",
+]
 
-[tool.poetry.dependencies]
-python = "^3.9"
-fastapi = "^0.104.0"
-uvicorn = {extras = ["standard"], version = "^0.24.0"}
-pydantic = "^2.5.0"
-langchain = "^0.1.0"
-langgraph = "^0.0.20"
-openai = "^1.3.0"
-httpx = "^0.25.0"
-python-multipart = "^0.0.6"
-semver = "^3.0.0"
+[tool.hatch.build.targets.wheel]
+packages = ["runtime"]
 
-[tool.poetry.group.dev.dependencies]
-pytest = "^7.4.0"
-pytest-asyncio = "^0.21.0"
-pytest-cov = "^4.1.0"
-black = "^23.0.0"
-isort = "^5.12.0"
-flake8 = "^6.0.0"
-mypy = "^1.5.0"
+[dependency-groups]
+dev = [
+    "ruff>=0.12.1",
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.0"
+]
 
-[tool.black]
-line-length = 100
-target-version = ['py38']
+[tool.ruff]
+line-length = 110
+lint.select = ["E", "F", "I", "UP"]
+lint.ignore = []
+lint.fixable = ["E501", "UP006"]
+exclude = [".venv", "build", "dist", "migrations"]
+target-version = "py39"
 
-[tool.isort]
-profile = "black"
-line_length = 100
-
-[tool.mypy]
-python_version = "3.8"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -51,3 +57,5 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "--strict-markers --strict-config --verbose" 
+
+

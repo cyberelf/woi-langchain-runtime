@@ -1,11 +1,11 @@
 """Tests for API endpoints."""
 
-import pytest
-from fastapi.testclient import TestClient
 from unittest.mock import patch
 
+import pytest
+from fastapi.testclient import TestClient
+
 from runtime.main import app
-from runtime.models import AgentType
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def test_root_endpoint(client):
     response = client.get("/")
     assert response.status_code == 200
     data = response.json()
-    assert data["service"] == "LangChain Agent Runtime"
+    assert data["service"] == "Agent Runtime Service"
     assert "version" in data
 
 
@@ -38,7 +38,7 @@ def test_ping_endpoint(client):
     assert data["message"] == "pong"
 
 
-@patch('runtime.config.settings.runtime_token', 'test-token')
+@patch("runtime.config.settings.runtime_token", "test-token")
 def test_get_schema(client, auth_headers):
     """Test schema endpoint."""
     response = client.get("/v1/schema", headers=auth_headers)
@@ -50,7 +50,7 @@ def test_get_schema(client, auth_headers):
     assert "limits" in data
 
 
-@patch('runtime.config.settings.runtime_token', 'test-token')
+@patch("runtime.config.settings.runtime_token", "test-token")
 def test_create_agent(client, auth_headers):
     """Test agent creation."""
     agent_data = {
@@ -63,11 +63,11 @@ def test_create_agent(client, auth_headers):
         "template_config": {
             "conversation": {
                 "continuous": True,
-                "historyLength": 10
-            }
+                "historyLength": 10,
+            },
         },
         "system_prompt": "You are a test agent.",
-        "llm_config_id": "test-llm-config"
+        "llm_config_id": "test-llm-config",
     }
     
     response = client.post("/v1/agents", json=agent_data, headers=auth_headers)
@@ -77,7 +77,7 @@ def test_create_agent(client, auth_headers):
     assert data["agent_id"] == "test-agent-1"
 
 
-@patch('runtime.config.settings.runtime_token', 'test-token')
+@patch("runtime.config.settings.runtime_token", "test-token")
 def test_health_check(client, auth_headers):
     """Test health check endpoint."""
     response = client.get("/v1/health", headers=auth_headers)
@@ -95,7 +95,7 @@ def test_unauthorized_access(client):
     assert response.status_code == 401
 
 
-@patch('runtime.config.settings.runtime_token', 'test-token')
+@patch("runtime.config.settings.runtime_token", "test-token")
 def test_invalid_token(client):
     """Test invalid token."""
     headers = {"X-Runtime-Token": "invalid-token"}

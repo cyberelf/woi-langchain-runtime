@@ -1,0 +1,125 @@
+---
+description: 
+globs: ai-platform-backend/app/db/*,ai-platform-backend/app/schemas/*
+alwaysApply: false
+---
+# Code Consistency Rules
+
+## Models and Timestamps
+
+All database models and Pydantic schemas must follow these conventions:
+
+### Database Models
+
+1. **Timestamp Fields**: Every database model must include standard timestamp fields:
+   ```python
+   created_at: Mapped[str] = mapped_column(
+       String(50), nullable=False, default=lambda: datetime.now(datetime.UTC).isoformat()
+   )
+   updated_at: Mapped[str] = mapped_column(
+       String(50), nullable=False, default=lambda: datetime.now(datetime.UTC).isoformat()
+   )
+   ```
+
+2. **ID Fields**: Use UUID strings for IDs:
+   ```python
+   id: Mapped[str] = mapped_column(
+       String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+   )
+   ```
+
+3. **Column Types**: Use consistent column types:
+   - Text: `String(length)`
+   - Booleans: `Boolean`
+   - JSON: `JSON`
+   - Status fields: `String(50)`
+
+### Pydantic Schemas
+
+1. **Base Models**: Define base models for common fields, then extend for specific uses:
+   ```python
+   class EntityBase(BaseModel):
+       """Base model for common fields."""
+       name: str
+       description: str
+       # ...
+
+   class EntityInDB(EntityBase):
+       """Schema for entity with ID as stored in the database."""
+       id: str
+       creator_id: str
+       created_at: str
+       updated_at: str
+   ```
+
+2. **Response Models**: Include timestamp fields in all response models:
+   ```python
+   class Entity(EntityInDB):
+       """Schema for entity responses."""
+       # Additional response-specific fields
+   ```
+
+3. **Configuration**: Use consistent Pydantic configuration:
+   ```python
+   model_config = ConfigDict(extra="forbid")
+   ```
+
+## Service Layer
+
+1. **Avoid Redundant API Calls**: When fetching data, avoid redundant API calls:
+   - Use repository methods directly instead of calling other service methods that make additional API calls
+   - Example: `list_documents` should get knowledge base directly from repository instead of calling `get_by_id`
+
+2. **Timestamp Handling**: Update timestamps in service layer:
+   ```python
+   now = datetime.now(timezone.utc).isoformat()
+   data["created_at"] = now
+   data["updated_at"] = now
+   ```
+
+3. **Error Handling**: Return appropriate error responses:
+   ```python
+   if not entity:
+       return {
+           "success": False,
+           "message": f"{entity_type} with ID {id} not found"
+       }
+   ```
+
+## API Endpoints
+
+1. **HTTP Status Codes**: Use appropriate HTTP status codes:
+   - 200: Successful response
+   - 201: Resource created
+   - 204: Successful deletion (no content)
+   - 404: Resource not found
+   - 422: Validation error
+
+2. **Error Responses**: Always check service responses for entity not found errors:
+   ```python
+   result = await service.method(id)
+   if "not found" in result.get("message", ""):
+       raise HTTPException(
+           status_code=status.HTTP_404_NOT_FOUND,
+           detail=result["message"]
+       )
+   ```
+
+## Testing
+
+1. **Mock Objects**: Use properly typed mock objects:
+   ```python
+   # Import the schema
+   from app.schemas.entity import EntityResponse
+   
+   # Mock response using the schema class
+   mock_response = EntityResponse(
+       id="test-id",
+       name="Test Entity",
+       created_at="2025-01-01T00:00:00",
+       updated_at="2025-01-01T00:00:00"
+   )
+   ```
+
+2. **Assertions**: Always verify service methods are called with correct parameters and correct number of times
+

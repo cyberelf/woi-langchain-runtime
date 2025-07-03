@@ -1,0 +1,117 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ai-platform.com/schemas/template-config.schema.json",
+  "title": "AI Platform Template Configuration Schema",
+  "description": "Simplified schema for agent template configurations",
+  "type": "object",
+  "definitions": {
+    "fieldType": {
+      "type": "string",
+      "enum": [
+        "string",
+        "integer", 
+        "number",
+        "boolean",
+        "array",
+        "object"
+      ],
+      "description": "Basic data types for configuration fields"
+    },
+    "fieldValidation": {
+      "type": "object",
+      "properties": {
+        "required": {
+          "type": "boolean",
+          "description": "Whether the field is required"
+        },
+        "minLength": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum string length"
+        },
+        "maxLength": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum string length"
+        },
+        "pattern": {
+          "type": "string",
+          "description": "Regular expression pattern for validation"
+        },
+        "min": {
+          "type": "number",
+          "description": "Minimum numeric value"
+        },
+        "max": {
+          "type": "number",
+          "description": "Maximum numeric value"
+        },
+        "minItems": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum number of items in array"
+        },
+        "maxItems": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum number of items in array"
+        },
+        "enum": {
+          "type": "array",
+          "description": "List of allowed values"
+        }
+      },
+      "additionalProperties": false
+    },
+    "configField": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+          "description": "Unique identifier for the configuration field"
+        },
+        "type": {
+          "$ref": "#/definitions/fieldType"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the field"
+        },
+        "default": {
+          "description": "Default value for the field"
+        },
+        "validation": {
+          "$ref": "#/definitions/fieldValidation"
+        }
+      },
+      "required": ["key", "type"],
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable name of the template"
+    },
+    "description": {
+      "type": "string",
+      "description": "Description of the template"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version of the template"
+    },
+    "config": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/configField"
+      },
+      "description": "Configuration fields as an ordered array"
+    }
+  },
+  "required": ["name", "version", "config"],
+  "additionalProperties": false
+} 

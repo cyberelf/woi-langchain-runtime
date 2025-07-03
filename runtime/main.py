@@ -1,20 +1,19 @@
 """Main application entry point for LangChain Agent Runtime."""
 
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config import settings
-from .core import TemplateManager, AgentFactory, AgentScheduler
 from .api import router as api_router
+from .config import settings
+from .core import AgentFactory, AgentScheduler, TemplateManager
 
 # Configure logging
 logging.basicConfig(
     level=getattr(logging, settings.log_level),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
 logger = logging.getLogger(__name__)
@@ -87,13 +86,13 @@ class AgentRuntime:
                 "templates_loaded": template_count,
                 "total_agents": factory_stats["total_agents"],
                 "active_agents": scheduler_stats.get("active_agents", 0),
-                "initialized": self.initialized
+                "initialized": self.initialized,
             }
         except Exception as e:
             return {
                 "status": "error",
                 "error": str(e),
-                "initialized": self.initialized
+                "initialized": self.initialized,
             }
 
 
@@ -122,7 +121,7 @@ def create_app() -> FastAPI:
         title="LangChain Agent Runtime",
         description="A LangChain/LangGraph-based agent runtime service",
         version="1.0.0",
-        lifespan=lifespan
+        lifespan=lifespan,
     )
     
     # Configure CORS
@@ -163,5 +162,5 @@ if __name__ == "__main__":
         host=settings.host,
         port=settings.port,
         reload=settings.debug,
-        log_level=settings.log_level.lower()
+        log_level=settings.log_level.lower(),
     ) 

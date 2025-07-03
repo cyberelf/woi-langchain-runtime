@@ -7,15 +7,15 @@ This module provides interfaces and implementations for:
 - Resource allocation and cleanup
 """
 
-from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
-from enum import Enum
 import asyncio
 import logging
+from abc import ABC, abstractmethod
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
-from .agent_factory import AgentFactoryInterface
 from ..models import AgentCreateRequest
+from .agent_factory import AgentFactoryInterface
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ class SchedulerInterface(ABC):
         pass
     
     @abstractmethod
-    def list_scheduled_tasks(self) -> List[Dict[str, Any]]:
+    def list_scheduled_tasks(self) -> list[dict[str, Any]]:
         """List all scheduled tasks."""
         pass
     
@@ -76,18 +76,18 @@ class AgentScheduler(SchedulerInterface):
         self.max_concurrent_agents = max_concurrent_agents
         
         # Agent status tracking
-        self.agent_status: Dict[str, AgentStatus] = {}
-        self.agent_last_activity: Dict[str, datetime] = {}
+        self.agent_status: dict[str, AgentStatus] = {}
+        self.agent_last_activity: dict[str, datetime] = {}
         
         # Task tracking
-        self.scheduled_tasks: Dict[str, Dict[str, Any]] = {}
+        self.scheduled_tasks: dict[str, dict[str, Any]] = {}
         self.task_counter = 0
         
         # Resource tracking
-        self.resource_usage: Dict[str, Any] = {
-            'memory_mb': 0,
-            'cpu_cores': 0.0,
-            'active_agents': 0
+        self.resource_usage: dict[str, Any] = {
+            "memory_mb": 0,
+            "cpu_cores": 0.0,
+            "active_agents": 0,
         }
         
         # Cleanup settings
@@ -153,11 +153,11 @@ class AgentScheduler(SchedulerInterface):
         
         # Track the task
         self.scheduled_tasks[task_id] = {
-            'type': 'create_agent',
-            'agent_id': agent_data.id,
-            'status': 'scheduled',
-            'created_at': datetime.now(),
-            'agent_data': agent_data
+            "type": "create_agent",
+            "agent_id": agent_data.id,
+            "status": "scheduled",
+            "created_at": datetime.now(),
+            "agent_data": agent_data,
         }
         
         # Set initial status
@@ -188,10 +188,10 @@ class AgentScheduler(SchedulerInterface):
         
         # Track the task
         self.scheduled_tasks[task_id] = {
-            'type': 'delete_agent',
-            'agent_id': agent_id,
-            'status': 'scheduled',
-            'created_at': datetime.now()
+            "type": "delete_agent",
+            "agent_id": agent_id,
+            "status": "scheduled",
+            "created_at": datetime.now(),
         }
         
         # Update status
@@ -223,7 +223,7 @@ class AgentScheduler(SchedulerInterface):
         """Update last activity timestamp for an agent."""
         self.agent_last_activity[agent_id] = datetime.now()
     
-    def list_scheduled_tasks(self) -> List[Dict[str, Any]]:
+    def list_scheduled_tasks(self) -> list[dict[str, Any]]:
         """List all scheduled tasks."""
         return list(self.scheduled_tasks.values())
     
@@ -261,33 +261,33 @@ class AgentScheduler(SchedulerInterface):
         
         return cleanup_count
     
-    def get_resource_usage(self) -> Dict[str, Any]:
+    def get_resource_usage(self) -> dict[str, Any]:
         """Get current resource usage statistics."""
         active_count = sum(1 for status in self.agent_status.values() 
                           if status in [AgentStatus.ACTIVE, AgentStatus.BUSY])
         
-        self.resource_usage['active_agents'] = active_count
+        self.resource_usage["active_agents"] = active_count
         return self.resource_usage.copy()
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get scheduler statistics."""
         status_counts = {}
         for status in AgentStatus:
             status_counts[status.value] = sum(1 for s in self.agent_status.values() if s == status)
         
         return {
-            'total_agents': len(self.agent_status),
-            'max_concurrent_agents': self.max_concurrent_agents,
-            'status_distribution': status_counts,
-            'pending_tasks': len([t for t in self.scheduled_tasks.values() if t['status'] == 'scheduled']),
-            'resource_usage': self.get_resource_usage()
+            "total_agents": len(self.agent_status),
+            "max_concurrent_agents": self.max_concurrent_agents,
+            "status_distribution": status_counts,
+            "pending_tasks": len([t for t in self.scheduled_tasks.values() if t["status"] == "scheduled"]),
+            "resource_usage": self.get_resource_usage(),
         }
     
     async def _execute_agent_creation(self, task_id: str, agent_data: AgentCreateRequest) -> None:
         """Execute agent creation task."""
         try:
             # Update task status
-            self.scheduled_tasks[task_id]['status'] = 'running'
+            self.scheduled_tasks[task_id]["status"] = "running"
             
             # Create the agent
             agent = self.agent_factory.create_agent(agent_data)
@@ -297,17 +297,17 @@ class AgentScheduler(SchedulerInterface):
             self.agent_last_activity[agent_data.id] = datetime.now()
             
             # Update task
-            self.scheduled_tasks[task_id]['status'] = 'completed'
-            self.scheduled_tasks[task_id]['completed_at'] = datetime.now()
+            self.scheduled_tasks[task_id]["status"] = "completed"
+            self.scheduled_tasks[task_id]["completed_at"] = datetime.now()
             
             logger.info(f"Agent creation completed: {agent_data.id}")
             
         except Exception as e:
             # Handle creation failure
             self.agent_status[agent_data.id] = AgentStatus.ERROR
-            self.scheduled_tasks[task_id]['status'] = 'failed'
-            self.scheduled_tasks[task_id]['error'] = str(e)
-            self.scheduled_tasks[task_id]['completed_at'] = datetime.now()
+            self.scheduled_tasks[task_id]["status"] = "failed"
+            self.scheduled_tasks[task_id]["error"] = str(e)
+            self.scheduled_tasks[task_id]["completed_at"] = datetime.now()
             
             logger.error(f"Agent creation failed: {agent_data.id} - {e}")
     
@@ -315,7 +315,7 @@ class AgentScheduler(SchedulerInterface):
         """Execute agent deletion task."""
         try:
             # Update task status
-            self.scheduled_tasks[task_id]['status'] = 'running'
+            self.scheduled_tasks[task_id]["status"] = "running"
             
             # Delete the agent
             success = self.agent_factory.destroy_agent(agent_id)
@@ -327,8 +327,8 @@ class AgentScheduler(SchedulerInterface):
                     del self.agent_last_activity[agent_id]
                 
                 # Update task
-                self.scheduled_tasks[task_id]['status'] = 'completed'
-                self.scheduled_tasks[task_id]['completed_at'] = datetime.now()
+                self.scheduled_tasks[task_id]["status"] = "completed"
+                self.scheduled_tasks[task_id]["completed_at"] = datetime.now()
                 
                 logger.info(f"Agent deletion completed: {agent_id}")
             else:
@@ -337,9 +337,9 @@ class AgentScheduler(SchedulerInterface):
         except Exception as e:
             # Handle deletion failure
             self.agent_status[agent_id] = AgentStatus.ERROR
-            self.scheduled_tasks[task_id]['status'] = 'failed'
-            self.scheduled_tasks[task_id]['error'] = str(e)
-            self.scheduled_tasks[task_id]['completed_at'] = datetime.now()
+            self.scheduled_tasks[task_id]["status"] = "failed"
+            self.scheduled_tasks[task_id]["error"] = str(e)
+            self.scheduled_tasks[task_id]["completed_at"] = datetime.now()
             
             logger.error(f"Agent deletion failed: {agent_id} - {e}")
     
@@ -378,8 +378,8 @@ class AgentScheduler(SchedulerInterface):
         
         tasks_to_remove = []
         for task_id, task_info in self.scheduled_tasks.items():
-            if (task_info['status'] in ['completed', 'failed'] and 
-                task_info.get('completed_at', datetime.now()) < cutoff_time):
+            if (task_info["status"] in ["completed", "failed"] and 
+                task_info.get("completed_at", datetime.now()) < cutoff_time):
                 tasks_to_remove.append(task_id)
         
         for task_id in tasks_to_remove:

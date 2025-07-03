@@ -1,12 +1,11 @@
 """LLM client for communicating with LLM Proxy service."""
 
-import asyncio
 import json
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from collections.abc import AsyncGenerator
+from typing import Any, Optional
 
 import httpx
-from langchain_core.language_models.base import BaseLanguageModel
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -29,11 +28,11 @@ class LLMProxyClient:
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         await self.client.aclose()
     
-    def _prepare_headers(self, llm_config_id: str) -> Dict[str, str]:
+    def _prepare_headers(self, llm_config_id: str) -> dict[str, str]:
         """Prepare headers for LLM Proxy request."""
         headers = {
             "Content-Type": "application/json",
-            "X-LLM-Config-ID": llm_config_id
+            "X-LLM-Config-ID": llm_config_id,
         }
         
         if self.proxy_token:
@@ -41,7 +40,7 @@ class LLMProxyClient:
         
         return headers
     
-    def _convert_messages(self, messages: List[ChatMessage]) -> List[Dict[str, str]]:
+    def _convert_messages(self, messages: list[ChatMessage]) -> list[dict[str, str]]:
         """Convert ChatMessage objects to LLM Proxy format."""
         return [
             {"role": msg.role.value, "content": msg.content}
@@ -50,23 +49,23 @@ class LLMProxyClient:
     
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10)
+        wait=wait_exponential(multiplier=1, min=4, max=10),
     )
     async def chat_completion(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         llm_config_id: str,
         stream: bool = False,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-        **kwargs: Any
-    ) -> Dict[str, Any]:
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         """Send chat completion request to LLM Proxy."""
         headers = self._prepare_headers(llm_config_id)
         
         payload = {
             "messages": self._convert_messages(messages),
-            "stream": stream
+            "stream": stream,
         }
         
         if temperature is not None:
@@ -82,7 +81,7 @@ class LLMProxyClient:
             response = await self.client.post(
                 f"{self.proxy_url}/v1/chat/completions",
                 headers=headers,
-                json=payload
+                json=payload,
             )
             response.raise_for_status()
             return response.json()
@@ -92,18 +91,18 @@ class LLMProxyClient:
     
     async def stream_chat_completion(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         llm_config_id: str,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-        **kwargs: Any
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+        **kwargs: Any,
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """Stream chat completion from LLM Proxy."""
         headers = self._prepare_headers(llm_config_id)
         
         payload = {
             "messages": self._convert_messages(messages),
-            "stream": True
+            "stream": True,
         }
         
         if temperature is not None:
@@ -119,7 +118,7 @@ class LLMProxyClient:
                 "POST",
                 f"{self.proxy_url}/v1/chat/completions",
                 headers=headers,
-                json=payload
+                json=payload,
             ) as response:
                 response.raise_for_status()
                 
@@ -155,10 +154,10 @@ class FallbackLLMClient:
             base_url=self.openai_base_url,
             model="gpt-3.5-turbo",
             temperature=0.7,
-            timeout=settings.llm_request_timeout
+            timeout=settings.llm_request_timeout,
         )
     
-    def _convert_to_langchain_messages(self, messages: List[ChatMessage]) -> List[BaseMessage]:
+    def _convert_to_langchain_messages(self, messages: list[ChatMessage]) -> list[BaseMessage]:
         """Convert ChatMessage objects to LangChain messages."""
         langchain_messages = []
         
@@ -174,13 +173,13 @@ class FallbackLLMClient:
     
     async def chat_completion(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         llm_config_id: str,
         stream: bool = False,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-        **kwargs: Any
-    ) -> Dict[str, Any]:
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         """Send chat completion request using direct OpenAI integration."""
         langchain_messages = self._convert_to_langchain_messages(messages)
         
@@ -200,15 +199,15 @@ class FallbackLLMClient:
                     "choices": [{
                         "message": {
                             "role": "assistant",
-                            "content": response.content
+                            "content": response.content,
                         },
-                        "finish_reason": "stop"
+                        "finish_reason": "stop",
                     }],
                     "usage": {
                         "prompt_tokens": 0,  # Would need to calculate
                         "completion_tokens": 0,  # Would need to calculate
-                        "total_tokens": 0
-                    }
+                        "total_tokens": 0,
+                    },
                 }
             else:
                 response = await self.llm.ainvoke(langchain_messages)
@@ -216,15 +215,15 @@ class FallbackLLMClient:
                     "choices": [{
                         "message": {
                             "role": "assistant",
-                            "content": response.content
+                            "content": response.content,
                         },
-                        "finish_reason": "stop"
+                        "finish_reason": "stop",
                     }],
                     "usage": {
                         "prompt_tokens": 0,  # Would need to calculate
                         "completion_tokens": 0,  # Would need to calculate
-                        "total_tokens": 0
-                    }
+                        "total_tokens": 0,
+                    },
                 }
         
         except Exception as e:
@@ -251,13 +250,13 @@ class LLMClientManager:
     
     async def chat_completion(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         llm_config_id: str,
         stream: bool = False,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-        **kwargs: Any
-    ) -> Dict[str, Any]:
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         """Send chat completion request with fallback support."""
         # Try proxy client first
         if self.proxy_client:
@@ -269,7 +268,7 @@ class LLMClientManager:
                         stream=stream,
                         temperature=temperature,
                         max_tokens=max_tokens,
-                        **kwargs
+                        **kwargs,
                     )
             except Exception as e:
                 print(f"LLM Proxy failed, trying fallback: {e}")
@@ -282,19 +281,19 @@ class LLMClientManager:
                 stream=stream,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                **kwargs
+                **kwargs,
             )
         
         raise RuntimeError("No LLM client available")
     
     async def stream_chat_completion(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         llm_config_id: str,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-        **kwargs: Any
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+        **kwargs: Any,
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """Stream chat completion with fallback support."""
         # Try proxy client first
         if self.proxy_client:
@@ -305,7 +304,7 @@ class LLMClientManager:
                         llm_config_id=llm_config_id,
                         temperature=temperature,
                         max_tokens=max_tokens,
-                        **kwargs
+                        **kwargs,
                     ):
                         yield chunk
                     return
@@ -320,7 +319,7 @@ class LLMClientManager:
                 stream=False,  # Fallback doesn't support streaming
                 temperature=temperature,
                 max_tokens=max_tokens,
-                **kwargs
+                **kwargs,
             )
             
             # Simulate streaming by yielding the complete response
@@ -328,11 +327,11 @@ class LLMClientManager:
                 "choices": [{
                     "delta": {
                         "role": "assistant",
-                        "content": response["choices"][0]["message"]["content"]
+                        "content": response["choices"][0]["message"]["content"],
                     },
-                    "finish_reason": "stop"
+                    "finish_reason": "stop",
                 }],
-                "usage": response.get("usage")
+                "usage": response.get("usage"),
             }
             return
         

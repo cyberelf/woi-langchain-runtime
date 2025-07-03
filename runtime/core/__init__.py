@@ -10,10 +10,10 @@ The design supports multiple underlying frameworks (LangChain, LangGraph, custom
 through a pluggable architecture.
 """
 
-from .template_manager import TemplateManager, TemplateRegistry
 from .agent_factory import AgentFactory, AgentFactoryInterface
+from .discovery import DiscoveryInterface, TemplateDiscovery
 from .scheduler import AgentScheduler, SchedulerInterface
-from .discovery import TemplateDiscovery, DiscoveryInterface
+from .template_manager import TemplateManager, TemplateRegistry
 
 __all__ = [
     # Template Management

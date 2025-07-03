@@ -1,0 +1,219 @@
+---
+description: 
+globs: backend/app/api/**/*.py,backend/app/services/**/*.py,backend/tests/**/*.py
+alwaysApply: false
+---
+# Error Handling Patterns
+
+Comprehensive error handling patterns based on proven implementations and successful test cleanup experience.
+
+## Core Exception Architecture
+
+### ✅ Custom Exception Hierarchy
+ALL services MUST use the custom exception hierarchy from [app/core/exceptions.py](mdc:backend/app/core/exceptions.py).
+
+```python
+# ✅ REQUIRED: Use specific exception types
+from app.core.exceptions import (
+    AgentNotFoundError,
+    RuntimeNotFoundError, 
+    TemplateNotFoundError,
+    LLMConfigNotFoundError,
+    DebugSessionNotFoundError,
+    ValidationError,
+    ExternalServiceError
+)
+
+# ✅ REQUIRED: Raise exceptions instead of returning None
+async def get_by_id(self, id: str) -> Entity:
+    entity = await self.repository.get_by_id(id)
+    if not entity:
+        raise EntityNotFoundError(f"Entity with ID {id} not found")
+    return self._to_schema(entity)
+```
+
+### ❌ Anti-Pattern: Returning None
+```python
+# ❌ NEVER DO THIS: Causes HTTP 500 instead of proper 404
+async def get_by_id(self, id: str) -> Optional[Entity]:
+    entity = await self.repository.get_by_id(id)
+    if not entity:
+        return None  # This breaks FastAPI response serialization
+    return self._to_schema(entity)
+```
+
+## API Layer Error Handling
+
+### ✅ Error Handler Decorator
+ALL API routes MUST use the `@handle_service_errors` decorator from [app/utils/error_handlers.py](mdc:backend/app/utils/error_handlers.py).
+
+```python
+from app.utils.error_handlers import handle_service_errors
+
+@router.get("/{entity_id}", response_model=EntitySchema)
+@handle_service_errors  # ✅ REQUIRED
+async def get_entity(entity_id: str, service: EntityService = Depends(get_entity_service)):
+    return await service.get_by_id(entity_id)
+```
+
+### ✅ Structured Error Response Format
+The error handler automatically converts exceptions to this standardized format:
+
+```json
+{
+  "error": {
+    "code": "ENTITY_NOT_FOUND",
+    "message": "Entity with ID abc123 not found",
+    "context": {},
+    "field": null
+  },
+  "details": null,
+  "request_id": "uuid-here",
+  "timestamp": "2025-01-01T00:00:00Z"
+}
+```
+
+### ❌ Anti-Pattern: Manual HTTPException
+```python
+# ❌ AVOID: Use custom exceptions instead
+if not entity:
+    raise HTTPException(status_code=404, detail="Not found")  # Old format
+
+# ✅ CORRECT: Let error handler convert
+if not entity:
+    raise EntityNotFoundError(f"Entity with ID {id} not found")
+```
+
+## Service Layer Patterns
+
+### ✅ Exception Propagation
+Services should raise exceptions and let the error handler convert them:
+
+```python
+class EntityService:
+    async def delete(self, id: str) -> bool:
+        # ✅ Check existence first and raise exception
+        entity = await self.repository.get_by_id(id)
+        if not entity:
+            raise EntityNotFoundError(f"Entity with ID {id} not found")
+        
+        # ✅ Check business rules
+        if self._has_references(entity):
+            raise ValidationError(f"Cannot delete entity {id}: still referenced by other entities")
+        
+        return await self.repository.delete(id)
+```
+
+### ✅ Graceful Error Handling for Optional Operations
+For operations that should return structured errors instead of exceptions:
+
+```python
+async def sync_runtime(self, runtime_id: str) -> RuntimeSyncResult:
+    try:
+        runtime = await self.get_runtime(runtime_id)
+    except RuntimeNotFoundError:
+        # ✅ Convert to structured error response
+        return RuntimeSyncResult(success=False, error="Runtime not found")
+    
+    # Continue with sync logic...
+```
+
+## Testing Error Handling
+
+### ✅ Test Response Format
+ALL tests MUST expect the new error response format:
+
+```python
+# ✅ CORRECT: Test new error format
+def test_entity_not_found(client):
+    response = client.get("/entities/nonexistent")
+    assert response.status_code == 404
+    data = response.json()
+    assert "error" in data
+    assert "Entity with ID nonexistent not found" in data["error"]["message"]
+
+# ❌ OLD FORMAT: Will fail
+def test_entity_not_found_old(client):
+    response = client.get("/entities/nonexistent")
+    assert "detail" in response.json()  # This will fail
+```
+
+### ✅ Mock Service Exceptions
+When mocking services in tests, raise proper exceptions:
+
+```python
+@patch('app.services.entity.EntityService.get_by_id')
+def test_service_error(mock_get, client):
+    mock_get.side_effect = EntityNotFoundError("Entity not found")
+    response = client.get("/entities/123")
+    assert response.status_code == 404
+```
+
+## Common Bug Patterns Fixed
+
+### 🔧 Service Methods Returning None
+**Problem**: Service methods returning `None` cause FastAPI to serialize `None` into response models, resulting in Pydantic validation errors and HTTP 500.
+
+**Solution**: Always raise appropriate exceptions:
+```python
+# ✅ FIXED in multiple services
+async def get_by_id(self, id: str) -> EntitySchema:
+    entity = await self.repository.get_by_id(id)
+    if not entity:
+        raise EntityNotFoundError(f"Entity with ID {id} not found")
+    return EntitySchema.model_validate(entity.model_dump())
+```
+
+### 🔧 Missing Error Handler Decorators
+**Problem**: Routes without `@handle_service_errors` return raw HTTPException format.
+
+**Solution**: Add decorator to all routes:
+```python
+@router.post("/{entity_id}/action", response_model=dict)
+@handle_service_errors  # ✅ REQUIRED
+async def entity_action(entity_id: str, service: EntityService = Depends(get_service)):
+    return await service.perform_action(entity_id)
+```
+
+### 🔧 Validation Errors
+**Problem**: Business validation returning `None` or wrong error types.
+
+**Solution**: Use `ValidationError` for business rule violations:
+```python
+# ✅ Business rule validation
+if not self._is_valid_config(config):
+    raise ValidationError("Invalid configuration: missing required fields")
+
+# ✅ Reference integrity checks  
+if self._has_references(entity):
+    raise ValidationError(f"Cannot delete entity: referenced by other entities")
+```
+
+## Status Code Mapping
+
+The error handler automatically maps exceptions to appropriate HTTP status codes:
+
+- `EntityNotFoundError` → 404 Not Found
+- `ValidationError` → 422 Unprocessable Entity  
+- `ExternalServiceError` → 500 Internal Server Error
+- `NetworkError` → 503 Service Unavailable
+- `PermissionError` → 403 Forbidden
+
+## Implementation Checklist
+
+- [ ] All service methods raise exceptions instead of returning `None`
+- [ ] All API routes use `@handle_service_errors` decorator
+- [ ] All tests expect new error response format (`error.message` not `detail`)
+- [ ] Business validation uses `ValidationError`
+- [ ] External service calls use `ExternalServiceError`
+- [ ] Entity lookups use specific `EntityNotFoundError` types
+- [ ] Optional operations handle exceptions gracefully when needed
+
+## Success Metrics
+
+Following these patterns achieved:
+- **100% test pass rate** (from 29 failures to 0)
+- **Consistent error responses** across all APIs
+- **Proper HTTP status codes** for all error conditions
+- **Improved debugging** with structured error context
+- **Better user experience** with clear error messages

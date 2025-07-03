@@ -1,17 +1,11 @@
 """Pydantic models for API requests and responses."""
 
-from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-
-class AgentType(str, Enum):
-    """Agent types supported by the runtime."""
-    CONVERSATION = "conversation"
-    TASK = "task"
-    CUSTOM = "custom"
+from runtime.generated import TemplateConfigSchema
 
 
 class MessageRole(str, Enum):
@@ -39,7 +33,7 @@ class ConversationConfig(BaseModel):
 
 class TaskStepsConfig(BaseModel):
     """Task steps configuration."""
-    steps: List[str] = Field(..., min_items=1, max_items=20, description="List of task execution steps")
+    steps: list[str] = Field(..., min_length=1, max_length=20, description="List of task execution steps")
     stepTimeout: int = Field(default=300, ge=10, le=3600, description="Timeout for each step in seconds")
     retryCount: int = Field(default=2, ge=0, le=5, description="Number of retries on step failure")
     parallelExecution: bool = Field(default=False, description="Allow parallel step execution")
@@ -56,7 +50,7 @@ class CodeSourceConfig(BaseModel):
     type: str = Field(..., description="Code type: inline, repository, or package")
     content: str = Field(..., description="Code content or reference")
     entryPoint: str = Field(default="main", description="Code execution entry point")
-    dependencies: List[str] = Field(default_factory=list, description="Required dependencies")
+    dependencies: list[str] = Field(default_factory=list, description="Required dependencies")
 
 
 class RuntimeConfig(BaseModel):
@@ -72,20 +66,20 @@ class AgentCreateRequest(BaseModel):
     id: str = Field(..., description="Unique agent identifier")
     name: str = Field(..., description="Agent name")
     description: str = Field(..., description="Agent description")
-    type: AgentType = Field(..., description="Agent type")
+    type: str = Field(..., description="Agent type/template_id")
     template_id: str = Field(..., description="Template identifier")
     template_version_id: str = Field(..., description="Template version identifier")
-    template_config: Dict[str, Any] = Field(default_factory=dict, description="Template-specific configuration")
+    template_config: dict[str, Any] = Field(default_factory=dict, description="Template-specific configuration")
     system_prompt: str = Field(..., description="System prompt for the agent")
     conversation_config: Optional[ConversationConfig] = Field(default=None, description="Conversation configuration")
-    toolsets: List[str] = Field(default_factory=list, description="Selected toolsets")
+    toolsets: list[str] = Field(default_factory=list, description="Selected toolsets")
     llm_config_id: str = Field(..., description="LLM configuration identifier")
 
 
 class ValidationResult(BaseModel):
     """Validation result."""
     valid: bool = Field(..., description="Whether validation passed")
-    warnings: List[str] = Field(default_factory=list, description="Validation warnings")
+    warnings: list[str] = Field(default_factory=list, description="Validation warnings")
 
 
 class AgentResponse(BaseModel):
@@ -107,11 +101,11 @@ class ChatMessage(BaseModel):
 class ChatCompletionRequest(BaseModel):
     """OpenAI-compatible chat completion request."""
     model: str = Field(..., description="Agent ID to execute")
-    messages: List[ChatMessage] = Field(..., description="Conversation messages")
+    messages: list[ChatMessage] = Field(..., description="Conversation messages")
     stream: bool = Field(default=False, description="Whether to stream the response")
     temperature: Optional[float] = Field(default=0.7, ge=0.0, le=2.0, description="Sampling temperature")
     max_tokens: Optional[int] = Field(default=None, ge=1, description="Maximum tokens to generate")
-    metadata: Optional[Dict[str, Any]] = Field(default=None, description="Additional execution metadata")
+    metadata: Optional[dict[str, Any]] = Field(default=None, description="Additional execution metadata")
 
 
 class ChatChoice(BaseModel):
@@ -138,10 +132,10 @@ class ExecutionStep(BaseModel):
 class ChatCompletionMetadata(BaseModel):
     """Extended metadata for chat completion."""
     agent_id: str = Field(..., description="Agent identifier")
-    agent_type: AgentType = Field(..., description="Agent type")
+    agent_type: str = Field(..., description="Agent type")
     processing_time_ms: int = Field(..., description="Total processing time in milliseconds")
-    execution_steps: List[ExecutionStep] = Field(default_factory=list, description="Execution steps")
-    tools_used: List[str] = Field(default_factory=list, description="Tools used during execution")
+    execution_steps: list[ExecutionStep] = Field(default_factory=list, description="Execution steps")
+    tools_used: list[str] = Field(default_factory=list, description="Tools used during execution")
     confidence_score: Optional[float] = Field(default=None, description="Confidence score")
 
 
@@ -151,7 +145,7 @@ class ChatCompletionResponse(BaseModel):
     object: str = Field(default="chat.completion", description="Object type")
     created: int = Field(..., description="Creation timestamp")
     model: str = Field(..., description="Model/agent ID")
-    choices: List[ChatChoice] = Field(..., description="Completion choices")
+    choices: list[ChatChoice] = Field(..., description="Completion choices")
     usage: ChatUsage = Field(..., description="Token usage")
     metadata: Optional[ChatCompletionMetadata] = Field(default=None, description="Extended metadata")
 
@@ -162,46 +156,11 @@ class ChatCompletionChunk(BaseModel):
     object: str = Field(default="chat.completion.chunk", description="Object type")
     created: int = Field(..., description="Creation timestamp")
     model: str = Field(..., description="Model/agent ID")
-    choices: List[Dict[str, Any]] = Field(..., description="Streaming choices")
+    choices: list[dict[str, Any]] = Field(..., description="Streaming choices")
     usage: Optional[ChatUsage] = Field(default=None, description="Token usage (final chunk only)")
 
 
 # Schema Models
-
-class FieldValidation(BaseModel):
-    """Field validation rules."""
-    min: Optional[int] = Field(default=None, description="Minimum value")
-    max: Optional[int] = Field(default=None, description="Maximum value")
-    minItems: Optional[int] = Field(default=None, description="Minimum array items")
-    maxItems: Optional[int] = Field(default=None, description="Maximum array items")
-    pattern: Optional[str] = Field(default=None, description="Regex pattern")
-
-
-class ConfigField(BaseModel):
-    """Configuration field definition."""
-    id: str = Field(..., description="Field identifier")
-    type: str = Field(..., description="Field type")
-    label: str = Field(..., description="Field label")
-    description: str = Field(..., description="Field description")
-    defaultValue: Optional[Any] = Field(default=None, description="Default value")
-    validation: Optional[FieldValidation] = Field(default=None, description="Validation rules")
-
-
-class ConfigSection(BaseModel):
-    """Configuration section definition."""
-    id: str = Field(..., description="Section identifier")
-    title: str = Field(..., description="Section title")
-    description: str = Field(..., description="Section description")
-    fields: List[ConfigField] = Field(..., description="Section fields")
-
-
-class AgentTemplateSchema(BaseModel):
-    """Agent template schema definition."""
-    template_name: str = Field(..., description="Template name")
-    template_id: str = Field(..., description="Template identifier")
-    sections: List[ConfigSection] = Field(..., description="Configuration sections")
-
-
 class RuntimeRequirements(BaseModel):
     """Runtime requirements for agent template."""
     memory: str = Field(..., description="Memory requirement")
@@ -214,9 +173,9 @@ class AgentTemplate(BaseModel):
     """Agent template definition."""
     template_name: str = Field(..., description="Template name")
     template_id: str = Field(..., description="Template identifier")
+    template_type: str = Field(..., description="Template type")
     version: str = Field(..., description="Template version")
-    configSchema: AgentTemplateSchema = Field(..., description="Configuration schema")
-    runtimeRequirements: RuntimeRequirements = Field(..., description="Runtime requirements")
+    configSchema: TemplateConfigSchema = Field(..., description="Configuration schema")
 
 
 class RuntimeCapabilities(BaseModel):
@@ -238,7 +197,7 @@ class SchemaResponse(BaseModel):
     """Runtime schema response."""
     version: str = Field(..., description="Schema version")
     lastUpdated: str = Field(..., description="Last update timestamp")
-    supportedAgentTemplates: List[AgentTemplate] = Field(..., description="Supported agent templates")
+    supportedAgentTemplates: list[AgentTemplate] = Field(..., description="Supported agent templates")
     capabilities: RuntimeCapabilities = Field(..., description="Runtime capabilities")
     limits: RuntimeLimits = Field(..., description="Runtime limits")
 
@@ -249,7 +208,7 @@ class HealthCheckItem(BaseModel):
     """Individual health check item."""
     service: str = Field(..., description="Service name")
     status: str = Field(..., description="Health status")
-    details: Optional[Dict[str, Any]] = Field(default=None, description="Additional details")
+    details: Optional[dict[str, Any]] = Field(default=None, description="Additional details")
 
 
 class HealthMetrics(BaseModel):
@@ -265,7 +224,7 @@ class HealthResponse(BaseModel):
     status: str = Field(..., description="Overall health status")
     timestamp: str = Field(..., description="Check timestamp")
     version: str = Field(..., description="Runtime version")
-    checks: List[HealthCheckItem] = Field(..., description="Individual health checks")
+    checks: list[HealthCheckItem] = Field(..., description="Individual health checks")
     metrics: HealthMetrics = Field(..., description="Runtime metrics")
 
 

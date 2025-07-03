@@ -7,22 +7,32 @@ This module provides comprehensive template management including:
 - Template lifecycle management
 """
 
-import semver
+import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Type, Any, Set, Tuple
-import logging
+from typing import Any, Dict, List, Optional, Set
 
-from .discovery import TemplateDiscovery, TemplateInfo, DiscoveryInterface
-from ..template_agent.base import BaseAgentTemplate, TemplateMetadata, ValidationResult
-from ..models import (
-    AgentTemplate, SchemaResponse, RuntimeCapabilities, RuntimeLimits, 
-    AgentCreateRequest, ConfigField, ConfigSection, AgentTemplateSchema, 
-    RuntimeRequirements
-)
+import semver
+from pydantic import BaseModel
+
 from .. import __version__
+from ..models import (
+    AgentCreateRequest,
+    AgentTemplate,
+    RuntimeCapabilities,
+    RuntimeLimits,
+    RuntimeRequirements,
+    SchemaResponse,
+)
+from ..generated import (
+    TemplateConfigSchema,
+    Configfield,
+    Fieldvalidation,
+)
+from ..template_agent.base import BaseAgentTemplate, TemplateMetadata, ValidationResult
+from .discovery import DiscoveryInterface, TemplateDiscovery, TemplateInfo
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +56,12 @@ class TemplateRegistryInterface(ABC):
         pass
     
     @abstractmethod
-    def list_templates(self) -> List[TemplateInfo]:
+    def list_templates(self) -> list[TemplateInfo]:
         """List all registered templates."""
         pass
     
     @abstractmethod
-    def list_versions(self, template_id: str) -> List[str]:
+    def list_versions(self, template_id: str) -> list[str]:
         """List all versions of a template."""
         pass
 
@@ -69,16 +79,16 @@ class TemplateRegistry(TemplateRegistryInterface):
     
     def __init__(self):
         # Template storage: {template_id: {version: TemplateInfo}}
-        self.templates: Dict[str, Dict[str, TemplateInfo]] = defaultdict(dict)
+        self.templates: dict[str, dict[str, TemplateInfo]] = defaultdict(dict)
         
         # Version ordering for each template
-        self.version_order: Dict[str, List[str]] = defaultdict(list)
+        self.version_order: dict[str, list[str]] = defaultdict(list)
         
         # Framework-specific registries
-        self.framework_templates: Dict[str, Set[str]] = defaultdict(set)
+        self.framework_templates: dict[str, set[str]] = defaultdict(set)
         
         # Template metadata cache
-        self.metadata_cache: Dict[str, TemplateMetadata] = {}
+        self.metadata_cache: dict[str, TemplateMetadata] = {}
     
     def register_template(self, template_info: TemplateInfo) -> bool:
         """
@@ -114,7 +124,7 @@ class TemplateRegistry(TemplateRegistryInterface):
             self.framework_templates[template_info.framework].add(template_id)
             
             # Cache metadata
-            if hasattr(template_info.template_class, 'get_metadata'):
+            if hasattr(template_info.template_class, "get_metadata"):
                 self.metadata_cache[f"{template_id}:{version}"] = template_info.template_class.get_metadata()
             
             logger.info(f"Registered template: {template_id}:{version} ({template_info.framework})")
@@ -206,7 +216,7 @@ class TemplateRegistry(TemplateRegistryInterface):
         
         return None
     
-    def list_templates(self, framework: Optional[str] = None) -> List[TemplateInfo]:
+    def list_templates(self, framework: Optional[str] = None) -> list[TemplateInfo]:
         """
         List all registered templates.
         
@@ -225,7 +235,7 @@ class TemplateRegistry(TemplateRegistryInterface):
         
         return templates
     
-    def list_versions(self, template_id: str) -> List[str]:
+    def list_versions(self, template_id: str) -> list[str]:
         """
         List all versions of a template.
         
@@ -242,7 +252,7 @@ class TemplateRegistry(TemplateRegistryInterface):
         versions = self.version_order.get(template_id, [])
         return versions[0] if versions else None
     
-    def get_compatible_versions(self, template_id: str, min_version: str) -> List[str]:
+    def get_compatible_versions(self, template_id: str, min_version: str) -> list[str]:
         """Get versions compatible with the minimum version requirement."""
         versions = self.version_order.get(template_id, [])
         compatible = []
@@ -304,13 +314,13 @@ class TemplateManager:
     def __init__(self, discovery: Optional[DiscoveryInterface] = None):
         self.registry = TemplateRegistry()
         self.discovery = discovery or TemplateDiscovery()
-        self.scan_paths: List[Path] = []
+        self.scan_paths: list[Path] = []
         self.auto_discovery_enabled = True
         
         # Framework-specific managers
-        self.framework_managers: Dict[str, Any] = {}
+        self.framework_managers: dict[str, Any] = {}
     
-    async def initialize(self, scan_paths: Optional[List[Path]] = None) -> None:
+    async def initialize(self, scan_paths: Optional[list[Path]] = None) -> None:
         """
         Initialize the template manager.
         
@@ -329,7 +339,7 @@ class TemplateManager:
         
         logger.info(f"Template manager initialized with {len(self.registry.list_templates())} templates")
     
-    async def discover_templates(self) -> List[TemplateInfo]:
+    async def discover_templates(self) -> list[TemplateInfo]:
         """Discover and register templates from configured paths."""
         discovered = await self.discovery.discover_templates(self.scan_paths)
         
@@ -355,14 +365,14 @@ class TemplateManager:
         # Get template
         template_info = self.registry.get_template(
             agent_data.template_id,
-            agent_data.template_version_id
+            agent_data.template_version_id,
         )
         
         if not template_info:
             available_templates = [t.template_id for t in self.registry.list_templates()]
             raise ValueError(
                 f"Template {agent_data.template_id}:{agent_data.template_version_id} not found. "
-                f"Available templates: {available_templates}"
+                f"Available templates: {available_templates}",
             )
         
         # Create instance using template class
@@ -371,7 +381,7 @@ class TemplateManager:
         except Exception as e:
             raise ValueError(f"Failed to create agent from template {agent_data.template_id}: {e}")
     
-    def validate_template_config(self, template_id: str, version: str, config: Dict[str, Any]) -> ValidationResult:
+    def validate_template_config(self, template_id: str, version: str, config: dict[str, Any]) -> ValidationResult:
         """
         Validate configuration for a specific template.
         
@@ -387,11 +397,11 @@ class TemplateManager:
         if not template_info:
             return ValidationResult(
                 valid=False,
-                errors=[f"Template {template_id}:{version} not found"]
+                errors=[f"Template {template_id}:{version} not found"],
             )
         
         # Use template's validation method
-        if hasattr(template_info.template_class, 'validate_config'):
+        if hasattr(template_info.template_class, "validate_config"):
             return template_info.template_class.validate_config(config)
         
         # Fallback basic validation
@@ -422,52 +432,20 @@ class TemplateManager:
             # Get metadata
             metadata = template_info.metadata
             
-            # Convert config schema to proper format
-            config_schema = metadata.get('config_schema', {})
-            sections = []
-            
-            if config_schema:
-                # Create a single section with all fields
-                fields = []
-                for field_id, field_def in config_schema.items():
-                    field = ConfigField(
-                        id=field_id,
-                        type=field_def.get('type', 'string'),
-                        label=field_def.get('label', field_id.replace('_', ' ').title()),
-                        description=field_def.get('description', ''),
-                        defaultValue=field_def.get('default'),
-                        validation=None
-                    )
-                    fields.append(field)
-                
-                section = ConfigSection(
-                    id="general",
-                    title="General Configuration",
-                    description="Template configuration options",
-                    fields=fields
-                )
-                sections.append(section)
-            
-            schema = AgentTemplateSchema(
-                template_name=metadata.get('name', template_info.template_id),
-                template_id=template_info.template_id,
-                sections=sections
-            )
-            
-            runtime_reqs = metadata.get('runtime_requirements', {})
-            requirements = RuntimeRequirements(
-                memory=runtime_reqs.get("memory", "256MB"),
-                cpu=runtime_reqs.get("cpu", "0.1 cores"),
-                gpu=runtime_reqs.get("gpu", False),
-                estimatedLatency=runtime_reqs.get("estimatedLatency", "< 2s")
+            # Convert Pydantic config schema to proper format
+            config_schema = metadata.get("config_schema", BaseModel)
+            schema = self._convert_pydantic_schema(
+                config_schema,
+                metadata.get("name", template_info.template_name),
+                template_info.version,
             )
             
             agent_template = AgentTemplate(
-                template_name=metadata.get('name', template_info.template_id),
+                template_name=metadata.get("name", template_info.template_name),
                 template_id=template_info.template_id,
+                template_type=template_info.framework,  # Use framework as template type
                 version=template_info.version,
                 configSchema=schema,
-                runtimeRequirements=requirements
             )
             agent_templates.append(agent_template)
         
@@ -476,14 +454,14 @@ class TemplateManager:
             streaming=True,
             toolCalling=True,
             multimodal=False,
-            codeExecution=True
+            codeExecution=True,
         )
         
         # Define runtime limits  
         limits = RuntimeLimits(
             maxConcurrentAgents=100,
             maxMessageLength=32000,
-            maxConversationHistory=100
+            maxConversationHistory=100,
         )
         
         return SchemaResponse(
@@ -491,18 +469,18 @@ class TemplateManager:
             lastUpdated=datetime.now().isoformat(),
             supportedAgentTemplates=agent_templates,
             capabilities=capabilities,
-            limits=limits
+            limits=limits,
         )
     
     def get_template_info(self, template_id: str, version: Optional[str] = None) -> Optional[TemplateInfo]:
         """Get template information."""
         return self.registry.get_template(template_id, version)
     
-    def list_templates(self, framework: Optional[str] = None) -> List[TemplateInfo]:
+    def list_templates(self, framework: Optional[str] = None) -> list[TemplateInfo]:
         """List all templates, optionally filtered by framework."""
         return self.registry.list_templates(framework)
     
-    def list_template_versions(self, template_id: str) -> List[str]:
+    def list_template_versions(self, template_id: str) -> list[str]:
         """List all versions of a template."""
         return self.registry.list_versions(template_id)
     
@@ -522,7 +500,7 @@ class TemplateManager:
         """Disable automatic template discovery."""
         self.auto_discovery_enabled = False
     
-    async def reload_templates(self) -> List[TemplateInfo]:
+    async def reload_templates(self) -> list[TemplateInfo]:
         """Reload all templates from scan paths."""
         # Clear registry
         for template_id in list(self.registry.templates.keys()):
@@ -542,4 +520,98 @@ class TemplateManager:
             return v1 > v2
         except ValueError:
             # Fallback to string comparison
-            return version1 > version2 
+            return version1 > version2
+
+    def _convert_pydantic_schema(self, config_schema: type[BaseModel], name: str, version: str) -> TemplateConfigSchema:
+        """Convert Pydantic model to TemplateConfigSchema."""
+        # Get Pydantic model schema
+        model_schema = config_schema.model_json_schema()
+        properties = model_schema.get("properties", {})
+        required_fields = set(model_schema.get("required", []))
+        definitions = model_schema.get("$defs", {})
+        
+        # Create configuration fields
+        config_fields = []
+        for field_name, field_info in properties.items():
+            # Map Pydantic types to our expected types
+            field_type = self._map_pydantic_type(field_info.get("type", "string"))
+            
+            # Create validation rules if present
+            validation = self._extract_validation_rules(field_info, field_name in required_fields, definitions)
+            
+            field = Configfield(
+                key=field_name,
+                type=field_type,
+                description=field_info.get("description", ""),
+                default=field_info.get("default"),
+                validation=validation,
+            )
+            config_fields.append(field)
+        
+        return TemplateConfigSchema(
+            name=name,
+            description=model_schema.get("description", f"Configuration schema for {name}"),
+            version=version,
+            config=config_fields,
+        )
+
+    def _map_pydantic_type(self, pydantic_type: str) -> str:
+        """Map Pydantic JSON schema types to our ConfigField types."""
+        type_mapping = {
+            "string": "string",
+            "integer": "integer", 
+            "number": "number",
+            "boolean": "boolean",
+            "array": "array",
+            "object": "object"
+        }
+        return type_mapping.get(pydantic_type, "string")
+    
+    def _extract_validation_rules(self, field_info: dict[str, Any], is_required: bool, definitions: dict[str, Any] = None) -> Optional[Fieldvalidation]:
+        """Extract validation rules from Pydantic field info."""
+        validation_params = {"required": is_required}
+        
+        # Check for various validation constraints
+        if "minimum" in field_info:
+            validation_params["min"] = field_info["minimum"]
+        if "maximum" in field_info:
+            validation_params["max"] = field_info["maximum"]
+        if "minLength" in field_info:
+            validation_params["minLength"] = field_info["minLength"]
+        if "maxLength" in field_info:
+            validation_params["maxLength"] = field_info["maxLength"]
+        if "minItems" in field_info:
+            validation_params["minItems"] = field_info["minItems"]
+        if "maxItems" in field_info:
+            validation_params["maxItems"] = field_info["maxItems"]
+        if "pattern" in field_info:
+            validation_params["pattern"] = field_info["pattern"]
+        if "enum" in field_info:
+            validation_params["enum"] = field_info["enum"]
+        
+        # Handle enum references ($ref)
+        if "$ref" in field_info and definitions:
+            ref_path = field_info["$ref"]
+            if ref_path.startswith("#/$defs/"):
+                ref_name = ref_path[8:]  # Remove "#/$defs/" prefix
+                if ref_name in definitions:
+                    ref_def = definitions[ref_name]
+                    if "enum" in ref_def:
+                        validation_params["enum"] = ref_def["enum"]
+        
+        # Handle Literal types (which are also enums)
+        if "anyOf" in field_info:
+            # Check if this is a Literal type (anyOf with const values)
+            literal_values = []
+            for option in field_info["anyOf"]:
+                if "const" in option:
+                    literal_values.append(option["const"])
+            
+            if literal_values:
+                validation_params["enum"] = literal_values
+        
+        # Return None if no validation rules found
+        if not validation_params:
+            return None
+            
+        return Fieldvalidation(**validation_params) 

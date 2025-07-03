@@ -8,14 +8,14 @@ agent instances across different underlying frameworks. It supports:
 - Resource allocation and cleanup
 """
 
-from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Any
-from datetime import datetime
 import logging
+from abc import ABC, abstractmethod
+from datetime import datetime
+from typing import Any, Optional
 
-from .template_manager import TemplateManager
-from ..template_agent.base import BaseAgentTemplate
 from ..models import AgentCreateRequest
+from ..template_agent.base import BaseAgentTemplate
+from .template_manager import TemplateManager
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class AgentFactoryInterface(ABC):
         pass
     
     @abstractmethod
-    def list_agents(self) -> List[str]:
+    def list_agents(self) -> list[str]:
         """List all active agent IDs."""
         pass
     
@@ -62,15 +62,15 @@ class AgentFactory(AgentFactoryInterface):
     
     def __init__(self, template_manager: TemplateManager):
         self.template_manager = template_manager
-        self.active_agents: Dict[str, BaseAgentTemplate] = {}
-        self.agent_metadata: Dict[str, Dict[str, Any]] = {}
+        self.active_agents: dict[str, BaseAgentTemplate] = {}
+        self.agent_metadata: dict[str, dict[str, Any]] = {}
         
         # Framework-specific factories
-        self.framework_factories: Dict[str, AgentFactoryInterface] = {}
+        self.framework_factories: dict[str, AgentFactoryInterface] = {}
         
         # Resource tracking
-        self.creation_timestamps: Dict[str, datetime] = {}
-        self.agent_metrics: Dict[str, Dict[str, Any]] = {}
+        self.creation_timestamps: dict[str, datetime] = {}
+        self.agent_metrics: dict[str, dict[str, Any]] = {}
     
     def create_agent(self, agent_data: AgentCreateRequest) -> BaseAgentTemplate:
         """
@@ -93,14 +93,14 @@ class AgentFactory(AgentFactoryInterface):
         # Get template information
         template_info = self.template_manager.get_template_info(
             agent_data.template_id,
-            agent_data.template_version_id
+            agent_data.template_version_id,
         )
         
         if not template_info:
             available_templates = [t.template_id for t in self.template_manager.list_templates()]
             raise ValueError(
                 f"Template {agent_data.template_id}:{agent_data.template_version_id} not found. "
-                f"Available templates: {available_templates}"
+                f"Available templates: {available_templates}",
             )
         
         try:
@@ -121,21 +121,21 @@ class AgentFactory(AgentFactoryInterface):
             
             # Store metadata
             self.agent_metadata[agent_data.id] = {
-                'template_id': agent_data.template_id,
-                'template_version': agent_data.template_version_id,
-                'framework': framework,
-                'agent_type': agent_data.type,
-                'created_at': self.creation_timestamps[agent_data.id].isoformat(),
-                'template_config': agent_data.template_config,
-                'conversation_config': agent_data.conversation_config
+                "template_id": agent_data.template_id,
+                "template_version": agent_data.template_version_id,
+                "framework": framework,
+                "agent_type": agent_data.type,
+                "created_at": self.creation_timestamps[agent_data.id].isoformat(),
+                "template_config": agent_data.template_config,
+                "conversation_config": agent_data.conversation_config,
             }
             
             # Initialize metrics
             self.agent_metrics[agent_data.id] = {
-                'total_executions': 0,
-                'total_response_time': 0.0,
-                'error_count': 0,
-                'last_execution': None
+                "total_executions": 0,
+                "total_response_time": 0.0,
+                "error_count": 0,
+                "last_execution": None,
             }
             
             logger.info(f"Created agent {agent_data.id} using template {agent_data.template_id}:{agent_data.template_version_id}")
@@ -163,7 +163,7 @@ class AgentFactory(AgentFactoryInterface):
             agent = self.active_agents[agent_id]
             
             # Check if agent has cleanup method
-            if hasattr(agent, 'cleanup'):
+            if hasattr(agent, "cleanup"):
                 agent.cleanup()
             
             # Remove from tracking
@@ -191,7 +191,7 @@ class AgentFactory(AgentFactoryInterface):
         """
         return self.active_agents.get(agent_id)
     
-    def list_agents(self) -> List[str]:
+    def list_agents(self) -> list[str]:
         """
         List all active agent IDs.
         
@@ -224,11 +224,11 @@ class AgentFactory(AgentFactoryInterface):
         agent_data.id = agent_id
         return self.create_agent(agent_data)
     
-    def get_agent_metadata(self, agent_id: str) -> Optional[Dict[str, Any]]:
+    def get_agent_metadata(self, agent_id: str) -> Optional[dict[str, Any]]:
         """Get metadata for an agent."""
         return self.agent_metadata.get(agent_id)
     
-    def get_agent_metrics(self, agent_id: str) -> Optional[Dict[str, Any]]:
+    def get_agent_metrics(self, agent_id: str) -> Optional[dict[str, Any]]:
         """Get metrics for an agent."""
         return self.agent_metrics.get(agent_id)
     
@@ -236,12 +236,12 @@ class AgentFactory(AgentFactoryInterface):
         """Update execution metrics for an agent."""
         if agent_id in self.agent_metrics:
             metrics = self.agent_metrics[agent_id]
-            metrics['total_executions'] += 1
-            metrics['total_response_time'] += execution_time
-            metrics['last_execution'] = datetime.now().isoformat()
+            metrics["total_executions"] += 1
+            metrics["total_response_time"] += execution_time
+            metrics["last_execution"] = datetime.now().isoformat()
             
             if error:
-                metrics['error_count'] += 1
+                metrics["error_count"] += 1
     
     def supports_framework(self, framework: str) -> bool:
         """
@@ -282,7 +282,7 @@ class AgentFactory(AgentFactoryInterface):
             del self.framework_factories[framework]
             logger.info(f"Unregistered framework factory for {framework}")
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """
         Get factory statistics.
         
@@ -297,9 +297,9 @@ class AgentFactory(AgentFactoryInterface):
         total_errors = 0
         
         for metrics in self.agent_metrics.values():
-            total_executions += metrics['total_executions']
-            total_response_time += metrics['total_response_time']
-            total_errors += metrics['error_count']
+            total_executions += metrics["total_executions"]
+            total_response_time += metrics["total_response_time"]
+            total_errors += metrics["error_count"]
         
         avg_response_time = total_response_time / total_executions if total_executions > 0 else 0.0
         error_rate = total_errors / total_executions if total_executions > 0 else 0.0
@@ -307,16 +307,16 @@ class AgentFactory(AgentFactoryInterface):
         # Framework distribution
         framework_counts = {}
         for metadata in self.agent_metadata.values():
-            framework = metadata['framework']
+            framework = metadata["framework"]
             framework_counts[framework] = framework_counts.get(framework, 0) + 1
         
         return {
-            'total_agents': total_agents,
-            'total_executions': total_executions,
-            'average_response_time': avg_response_time,
-            'error_rate': error_rate,
-            'framework_distribution': framework_counts,
-            'active_frameworks': list(self.framework_factories.keys())
+            "total_agents": total_agents,
+            "total_executions": total_executions,
+            "average_response_time": avg_response_time,
+            "error_rate": error_rate,
+            "framework_distribution": framework_counts,
+            "active_frameworks": list(self.framework_factories.keys()),
         }
     
     def cleanup_all(self) -> None:
@@ -337,17 +337,17 @@ class LangChainAgentFactory(AgentFactoryInterface):
     
     def __init__(self, template_manager: TemplateManager):
         self.template_manager = template_manager
-        self.active_agents: Dict[str, BaseAgentTemplate] = {}
+        self.active_agents: dict[str, BaseAgentTemplate] = {}
     
     def create_agent(self, agent_data: AgentCreateRequest) -> BaseAgentTemplate:
         """Create a LangChain-based agent."""
         # Get template and ensure it's a LangChain template
         template_info = self.template_manager.get_template_info(
             agent_data.template_id,
-            agent_data.template_version_id
+            agent_data.template_version_id,
         )
         
-        if not template_info or template_info.framework != 'langchain':
+        if not template_info or template_info.framework != "langchain":
             raise ValueError(f"Template {agent_data.template_id} is not a LangChain template")
         
         # Create agent using template
@@ -368,13 +368,13 @@ class LangChainAgentFactory(AgentFactoryInterface):
         """Get a LangChain agent."""
         return self.active_agents.get(agent_id)
     
-    def list_agents(self) -> List[str]:
+    def list_agents(self) -> list[str]:
         """List LangChain agents."""
         return list(self.active_agents.keys())
     
     def supports_framework(self, framework: str) -> bool:
         """Check if this factory supports the framework."""
-        return framework == 'langchain'
+        return framework == "langchain"
 
 
 class CustomAgentFactory(AgentFactoryInterface):
@@ -386,17 +386,17 @@ class CustomAgentFactory(AgentFactoryInterface):
     
     def __init__(self, template_manager: TemplateManager):
         self.template_manager = template_manager
-        self.active_agents: Dict[str, BaseAgentTemplate] = {}
+        self.active_agents: dict[str, BaseAgentTemplate] = {}
     
     def create_agent(self, agent_data: AgentCreateRequest) -> BaseAgentTemplate:
         """Create a custom agent."""
         # Get template and ensure it's a custom template
         template_info = self.template_manager.get_template_info(
             agent_data.template_id,
-            agent_data.template_version_id
+            agent_data.template_version_id,
         )
         
-        if not template_info or template_info.framework != 'custom':
+        if not template_info or template_info.framework != "custom":
             raise ValueError(f"Template {agent_data.template_id} is not a custom template")
         
         # Create agent using template
@@ -411,7 +411,7 @@ class CustomAgentFactory(AgentFactoryInterface):
         if agent_id in self.active_agents:
             # Custom agents might need special cleanup
             agent = self.active_agents[agent_id]
-            if hasattr(agent, 'cleanup'):
+            if hasattr(agent, "cleanup"):
                 agent.cleanup()
             
             del self.active_agents[agent_id]
@@ -422,10 +422,10 @@ class CustomAgentFactory(AgentFactoryInterface):
         """Get a custom agent."""
         return self.active_agents.get(agent_id)
     
-    def list_agents(self) -> List[str]:
+    def list_agents(self) -> list[str]:
         """List custom agents."""
         return list(self.active_agents.keys())
     
     def supports_framework(self, framework: str) -> bool:
         """Check if this factory supports the framework."""
-        return framework == 'custom' 
+        return framework == "custom" 

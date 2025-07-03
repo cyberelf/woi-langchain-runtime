@@ -10,12 +10,12 @@ across different underlying frameworks. It supports:
 
 import importlib
 import inspect
+import logging
 import sys
 from abc import ABC, abstractmethod
-from pathlib import Path
-from typing import Dict, List, Optional, Type, Any, Set, Callable
 from dataclasses import dataclass
-import logging
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Set, Type
 
 logger = logging.getLogger(__name__)
 
@@ -23,20 +23,21 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TemplateInfo:
     """Information about a discovered template."""
-    template_class: Type
+    template_class: type
     template_id: str
+    template_name: str
     version: str
     module_path: str
     file_path: Path
     framework: str  # 'langchain', 'custom', etc.
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
 
 
 class DiscoveryInterface(ABC):
     """Interface for template discovery implementations."""
     
     @abstractmethod
-    async def discover_templates(self, scan_paths: List[Path]) -> List[TemplateInfo]:
+    async def discover_templates(self, scan_paths: list[Path]) -> list[TemplateInfo]:
         """Discover templates in the given paths."""
         pass
     
@@ -46,7 +47,7 @@ class DiscoveryInterface(ABC):
         pass
     
     @abstractmethod
-    def get_template_info(self, template_class: Type) -> Optional[TemplateInfo]:
+    def get_template_info(self, template_class: type) -> Optional[TemplateInfo]:
         """Extract template information from a class."""
         pass
 
@@ -64,17 +65,17 @@ class TemplateDiscovery(DiscoveryInterface):
     
     def __init__(self, base_package: str = "runtime.template_agent"):
         self.base_package = base_package
-        self.discovered_templates: Dict[str, TemplateInfo] = {}
-        self.watched_paths: Set[Path] = set()
-        self.discovery_hooks: List[Callable[[TemplateInfo], None]] = []
+        self.discovered_templates: dict[str, TemplateInfo] = {}
+        self.watched_paths: set[Path] = set()
+        self.discovery_hooks: list[Callable[[TemplateInfo], None]] = []
         
         # Framework-specific discovery handlers
         self.framework_handlers = {
-            'langchain': self._discover_langchain_templates,
-            'custom': self._discover_custom_templates,
+            "langchain": self._discover_langchain_templates,
+            "custom": self._discover_custom_templates,
         }
     
-    async def discover_templates(self, scan_paths: List[Path]) -> List[TemplateInfo]:
+    async def discover_templates(self, scan_paths: list[Path]) -> list[TemplateInfo]:
         """
         Discover templates from the given paths using multiple strategies.
         
@@ -113,7 +114,7 @@ class TemplateDiscovery(DiscoveryInterface):
         logger.info(f"Discovered {len(templates)} templates")
         return templates
     
-    async def _inheritance_based_discovery(self) -> List[TemplateInfo]:
+    async def _inheritance_based_discovery(self) -> list[TemplateInfo]:
         """
         Discover templates using class inheritance mechanism.
         
@@ -142,7 +143,7 @@ class TemplateDiscovery(DiscoveryInterface):
         
         return templates
     
-    async def _scan_path(self, path: Path) -> List[TemplateInfo]:
+    async def _scan_path(self, path: Path) -> list[TemplateInfo]:
         """
         Scan a single path (file or directory) for templates.
         
@@ -156,7 +157,7 @@ class TemplateDiscovery(DiscoveryInterface):
         
         logger.info(f"Scanning for templates in: {path}")
         
-        if path.is_file() and path.suffix == '.py':
+        if path.is_file() and path.suffix == ".py":
             # Single file
             template_infos = await self._scan_file(path)
             templates.extend(template_infos)
@@ -171,7 +172,7 @@ class TemplateDiscovery(DiscoveryInterface):
         
         return templates
     
-    async def _scan_file(self, file_path: Path) -> List[TemplateInfo]:
+    async def _scan_file(self, file_path: Path) -> list[TemplateInfo]:
         """Scan a single Python file for template classes."""
         templates = []
         
@@ -201,24 +202,47 @@ class TemplateDiscovery(DiscoveryInterface):
     
     def _file_to_module_path(self, file_path: Path) -> str:
         """Convert file path to Python module path."""
-        # Get relative path from project root
         try:
+            # Convert to absolute path for consistent handling
+            abs_path = file_path.resolve()
+            
             # Find the project root (where runtime/ is located)
-            current = file_path.parent
+            current = abs_path
             while current != current.parent:
                 if (current / "runtime").exists():
-                    break
+                    # Found project root
+                    rel_path = abs_path.relative_to(current)
+                    module_path = str(rel_path.with_suffix("")).replace("/", ".")
+                    return module_path
                 current = current.parent
-            else:
-                # Fallback to relative path
-                current = Path.cwd()
             
-            # Get relative path and convert to module path
-            rel_path = file_path.relative_to(current)
-            module_path = str(rel_path.with_suffix("")).replace("/", ".")
-            return module_path
+            # If we can't find project root, try using current working directory
+            cwd = Path.cwd()
+            if abs_path.is_relative_to(cwd):
+                rel_path = abs_path.relative_to(cwd)
+                module_path = str(rel_path.with_suffix("")).replace("/", ".")
+                return module_path
             
-        except Exception:
+            # Last fallback: construct from file path structure
+            if "runtime/template_agent" in str(file_path):
+                # Extract the part after runtime/template_agent
+                parts = file_path.parts
+                runtime_idx = None
+                for i, part in enumerate(parts):
+                    if part == "runtime":
+                        runtime_idx = i
+                        break
+                
+                if runtime_idx is not None:
+                    module_parts = parts[runtime_idx:]
+                    module_path = ".".join(module_parts[:-1]) + "." + file_path.stem
+                    return module_path
+            
+            # Final fallback
+            return f"{self.base_package}.{file_path.stem}"
+            
+        except Exception as e:
+            logger.warning(f"Failed to convert file path to module path for {file_path}: {e}")
             # Fallback: use the base package + filename
             return f"{self.base_package}.{file_path.stem}"
     
@@ -237,7 +261,7 @@ class TemplateDiscovery(DiscoveryInterface):
             logger.warning(f"Failed to load module {module_path}: {e}")
             return None
     
-    def _is_template_class(self, cls: Type) -> bool:
+    def _is_template_class(self, cls: type) -> bool:
         """Check if a class is a valid template class."""
         # Check if it's a subclass of BaseAgentTemplate
         try:
@@ -249,73 +273,65 @@ class TemplateDiscovery(DiscoveryInterface):
         except ImportError:
             # Fallback: check for required template attributes
             return (inspect.isclass(cls) and
-                    hasattr(cls, 'template_id') and
-                    hasattr(cls, 'template_name') and
-                    hasattr(cls, 'execute'))
+                    hasattr(cls, "template_id") and
+                    hasattr(cls, "template_name") and
+                    hasattr(cls, "execute"))
     
-    def get_template_info(self, template_class: Type) -> Optional[TemplateInfo]:
+    def get_template_info(self, template_class: type) -> Optional[TemplateInfo]:
         """Extract template information from a class."""
         try:
             # Detect framework
             framework = self._detect_framework(template_class)
             
             # Get template metadata
-            if hasattr(template_class, 'get_metadata'):
-                metadata = template_class.get_metadata()
-                template_id = metadata.template_id
-                version = metadata.version
-                extra_metadata = {
-                    'name': metadata.name,
-                    'description': metadata.description,
-                    'agent_type': metadata.agent_type,
-                    'config_schema': metadata.config_schema,
-                    'runtime_requirements': metadata.runtime_requirements
+            metadata = template_class.get_metadata()
+            template_id = metadata.template_id
+            version = metadata.version
+            extra_metadata = {
+                "description": metadata.description,
+                "config_schema": metadata.config_schema,
                 }
-            else:
-                # Fallback for non-standard templates
-                template_id = getattr(template_class, 'template_id', template_class.__name__)
-                version = getattr(template_class, 'template_version', '1.0.0')
-                extra_metadata = {}
             
             return TemplateInfo(
                 template_class=template_class,
                 template_id=template_id,
+                template_name=metadata.name,
                 version=version,
                 module_path="",  # Will be set by caller
                 file_path=Path(),  # Will be set by caller
                 framework=framework,
-                metadata=extra_metadata
+                metadata=extra_metadata,
             )
             
         except Exception as e:
             logger.warning(f"Failed to extract template info from {template_class}: {e}")
             return None
     
-    def _detect_framework(self, template_class: Type) -> str:
+    def _detect_framework(self, template_class: type) -> str:
         """Detect which framework a template class belongs to."""
         # Check for LangChain/LangGraph indicators
-        if hasattr(template_class, '_build_graph'):
-            return 'langchain'
+        if hasattr(template_class, "_build_graph"):
+            return "langchain"
         
         # Check module path
         module = inspect.getmodule(template_class)
         if module:
-            if 'langchain' in module.__name__ or 'langgraph' in module.__name__:
-                return 'langchain'
+            if "langchain" in module.__name__ or "langgraph" in module.__name__:
+                return "langchain"
         
         # Default to custom
-        return 'custom'
+        return "custom"
     
     def supports_framework(self, framework: str) -> bool:
         """Check if this discovery mechanism supports the given framework."""
         return framework in self.framework_handlers
     
-    async def _discover_langchain_templates(self, path: Path) -> List[TemplateInfo]:
+    async def _discover_langchain_templates(self, path: Path) -> list[TemplateInfo]:
         """Framework-specific discovery for LangChain templates."""
         # Implementation specific to LangChain templates
         return await self._scan_file(path)
     
-    async def _discover_custom_templates(self, path: Path) -> List[TemplateInfo]:
+    async def _discover_custom_templates(self, path: Path) -> list[TemplateInfo]:
         """Framework-specific discovery for custom templates."""
         # Implementation specific to custom templates
         return await self._scan_file(path)
@@ -329,7 +345,7 @@ class TemplateDiscovery(DiscoveryInterface):
         if hook in self.discovery_hooks:
             self.discovery_hooks.remove(hook)
     
-    def get_discovered_templates(self) -> Dict[str, TemplateInfo]:
+    def get_discovered_templates(self) -> dict[str, TemplateInfo]:
         """Get all discovered templates."""
         return self.discovered_templates.copy()
     
@@ -344,9 +360,9 @@ class HotReloadDiscovery(TemplateDiscovery):
     
     def __init__(self, base_package: str = "runtime.template_agent"):
         super().__init__(base_package)
-        self.file_mtimes: Dict[Path, float] = {}
+        self.file_mtimes: dict[Path, float] = {}
     
-    async def watch_for_changes(self, scan_paths: List[Path]) -> List[TemplateInfo]:
+    async def watch_for_changes(self, scan_paths: list[Path]) -> list[TemplateInfo]:
         """Watch for file changes and reload templates."""
         changed_templates = []
         

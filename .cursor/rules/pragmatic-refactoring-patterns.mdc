@@ -1,0 +1,226 @@
+---
+description: 
+globs: *.py
+alwaysApply: false
+---
+# Layered Architecture Implementation Patterns
+
+Comprehensive patterns for implementing clean layered architecture and preventing anti-patterns, based on proven refactoring implementations.
+
+## Core Architecture Principles
+
+**Target**: Optimized layered architecture with proper separation of concerns and comprehensive implementation.
+
+**Requirements**:
+1. All changes must be architecturally sound and complete
+2. Proper inheritance and interface patterns must be followed  
+3. Transaction management must be consistent across all operations
+4. Service extraction must be thorough with proper delegation
+
+## Repository Layer
+
+### ✅ Mandatory Architecture
+ALL repositories MUST inherit from `SQLRepository[SchemaT, ModelT]` with proper typing.
+
+```python
+# ✅ REQUIRED
+class AgentVisibilityRepository(SQLRepository[AgentVisibilityInDB, AgentVisibilityModel]):
+    def __init__(self, session: AsyncSession):
+        super().__init__(session=session, model_class=AgentVisibilityModel, 
+                        schema_class=AgentVisibilityInDB, id_field="id")
+```
+
+### ✅ Transaction Management
+ALL database operations MUST use context manager pattern.
+
+```python
+# ✅ REQUIRED: Context manager for transactions
+@asynccontextmanager
+async def transaction(self) -> AsyncGenerator[AsyncSession, None]:
+    try:
+        yield self.session
+        await self.session.commit()
+    except Exception:
+        await self.session.rollback()
+        raise
+
+# ✅ REQUIRED: Usage pattern
+async def bulk_create(self, data: List[Schema], auto_commit: bool = True):
+    if auto_commit:
+        async with self.transaction():
+            # All operations here
+            return results
+    else:
+        # Direct operations for nested calls
+        return results
+```
+
+### ✅ Performance Optimization
+ALL relationship queries MUST use eager loading to prevent N+1 queries.
+
+```python
+# ✅ REQUIRED: Eager loading
+async def get_with_relationships(self):
+    stmt = select(Model).options(
+        selectinload(Model.relationship1),
+        selectinload(Model.relationship2)
+    )
+    return await self.session.execute(stmt).scalars().all()
+```
+
+## Service Layer
+
+### ✅ Service Extraction
+Services MUST be extracted when exceeding 500 lines OR handling multiple domains.
+
+```python
+# ✅ REQUIRED: Complete extraction
+class AgentVisibilityService:
+    def __init__(self, repository: AgentVisibilityRepository):
+        self.repository = repository
+    
+    # ALL visibility operations move here
+    async def get_agent_visibility(self, agent_id: str): ...
+    async def bulk_update_agent_visibility(self, agent_id: str, data): ...
+    # Complete interface implementation
+
+# ✅ REQUIRED: Complete delegation in main service
+class AgentService:
+    def __init__(self, repositories: AgentRepositoryGroup, ...):
+        self.visibility_service = AgentVisibilityService(repositories.visibility)
+    
+    async def get_agent_visibility(self, agent_id: str):
+        return await self.visibility_service.get_agent_visibility(agent_id)
+    # NO visibility logic remains here
+```
+
+### ✅ Dependency Grouping
+ALL services MUST use grouped dependencies (max 4-5 constructor parameters).
+
+```python
+# ✅ REQUIRED: Dependency grouping
+@dataclass
+class AgentRepositoryGroup:
+    agent: AgentRepository
+    template: AgentTemplateRepository
+    template_version: AgentTemplateVersionRepository
+    visibility: AgentVisibilityRepository
+
+@dataclass
+class ServiceGroup:
+    runtime_integration: RuntimeIntegrationService
+    app_integration: Optional[AppIntegrationService]
+    template_validation: TemplateValidationService
+
+class AgentService:
+    def __init__(self, repositories: AgentRepositoryGroup, services: ServiceGroup, 
+                 runtime_repo: RuntimeRepository, llm_repo: LLMConfigRepository):
+        # Clean 4-parameter constructor
+```
+
+## Configuration Layer
+
+### ✅ Helper Function Extraction
+ALL complex configuration logic MUST be externalized to helper functions.
+
+```python
+# ✅ REQUIRED: Helper functions
+def get_env_list(env_var: str, default: List[str]) -> List[str]:
+    value = os.getenv(env_var, "")
+    return [item.strip() for item in value.split(",") if item.strip()] if value else default
+
+def get_cors_origins(environment: str) -> List[str]:
+    env_origins = get_env_list("ALLOWED_ORIGINS", [])
+    if env_origins:
+        return env_origins
+    
+    defaults = {"development": ["http://localhost:3000"], "production": []}
+    return defaults.get(environment, [])
+
+# ✅ REQUIRED: Simple properties
+class Settings(BaseSettings):
+    @property
+    def allowed_origins(self) -> List[str]:
+        return get_cors_origins(self.ENVIRONMENT)
+```
+
+## Testing Layer
+
+### ✅ Test Architecture
+ALL extracted services MUST have comprehensive test coverage with grouped mocks.
+
+```python
+# ✅ REQUIRED: Mock structure matching service structure
+@dataclass
+class MockAgentRepositoryGroup:
+    agent: AsyncMock
+    template: AsyncMock
+    template_version: AsyncMock
+    visibility: AsyncMock
+
+def create_mock_agent_service(**kwargs) -> AgentService:
+    repositories = MockAgentRepositoryGroup(
+        agent=kwargs.get('agent_repository', AsyncMock()),
+        # ... other repos
+    )
+    return AgentService(repositories, ...)
+
+# ✅ REQUIRED: Transaction testing
+@pytest.mark.asyncio
+async def test_transaction_success_and_failure(repository, mock_session):
+    # Test successful transaction
+    async with repository.transaction():
+        pass
+    mock_session.commit.assert_called_once()
+    
+    # Test rollback on failure
+    with pytest.raises(ValueError):
+        async with repository.transaction():
+            raise ValueError()
+    mock_session.rollback.assert_called_once()
+```
+
+## Architectural Violations
+
+### ❌ Repository Anti-Patterns
+- Custom session handling without base inheritance
+- Manual transaction logic (`await session.commit()` in business code)
+- Parameter inconsistency (`db` instead of `session`)
+
+### ❌ Service Anti-Patterns  
+- God classes over 500 lines without extraction
+- Constructor overload (>5 individual dependencies)
+- Incomplete delegation (logic remaining in main service)
+
+### ❌ Configuration Anti-Patterns
+- Complex `@computed_field` properties
+- Environment logic scattered across modules
+
+### ❌ Transaction Anti-Patterns
+- Manual commit/rollback in service methods
+- Post-commit operations outside transaction boundaries
+
+## Implementation Requirements
+
+### Mandatory Compliance
+1. **Repository Inheritance**: 100% SQLRepository compliance
+2. **Transaction Safety**: 100% context manager usage
+3. **Service Extraction**: Complete when >500 lines or multiple domains
+4. **Dependency Grouping**: All services use grouped dependencies
+5. **Test Coverage**: Minimum 80% for all extracted services
+
+### Quality Metrics
+- Constructor parameters: Maximum 4-5
+- Service line count: Maximum 500-600 before extraction
+- Transaction safety: Zero manual commit/rollback
+- Performance: Zero N+1 query patterns
+
+### Completeness Checklist
+- [ ] All functionality moved to extracted service
+- [ ] Complete delegation without remaining logic
+- [ ] Consistent transaction patterns across all methods
+- [ ] Grouped dependencies properly injected
+- [ ] Configuration complexity externalized
+- [ ] Comprehensive test coverage
+- [ ] Zero breaking changes to APIs
+- [ ] Performance optimizations applied

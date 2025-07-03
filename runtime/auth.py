@@ -1,9 +1,7 @@
 """Authentication middleware for runtime token validation."""
 
-from typing import Optional
 
 from fastapi import HTTPException, Request, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from .config import settings
 
@@ -25,13 +23,13 @@ class RuntimeTokenAuth:
         if not token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Missing X-Runtime-Token header"
+                detail="Missing X-Runtime-Token header",
             )
         
         if not self.verify_token(token):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid runtime token"
+                detail="Invalid runtime token",
             )
         
         return True

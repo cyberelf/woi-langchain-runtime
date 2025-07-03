@@ -8,13 +8,20 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer
 
 from .auth import runtime_auth
-from .models import (
-    AgentCreateRequest, AgentResponse, ValidationResult,
-    ChatCompletionRequest, ChatCompletionResponse, ChatCompletionChunk,
-    SchemaResponse, HealthResponse, HealthCheckItem, HealthMetrics,
-    ErrorResponse
-)
 from .config import settings
+from .models import (
+    AgentCreateRequest,
+    AgentResponse,
+    ChatCompletionChunk,
+    ChatCompletionRequest,
+    ChatCompletionResponse,
+    ErrorResponse,
+    HealthCheckItem,
+    HealthMetrics,
+    HealthResponse,
+    SchemaResponse,
+    ValidationResult,
+)
 
 # Create router
 router = APIRouter()
@@ -28,10 +35,10 @@ startup_time = time.time()
 
 def get_runtime(request: Request):
     """Get runtime instance from app state."""
-    if not hasattr(request.app.state, 'runtime'):
+    if not hasattr(request.app.state, "runtime"):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Runtime not initialized"
+            detail="Runtime not initialized",
         )
     return request.app.state.runtime
 
@@ -40,7 +47,7 @@ def get_runtime(request: Request):
 async def create_agent(
     agent_data: AgentCreateRequest,
     request: Request,
-    _: bool = Depends(runtime_auth)
+    _: bool = Depends(runtime_auth),
 ) -> AgentResponse:
     """Create a new agent."""
     try:
@@ -55,19 +62,19 @@ async def create_agent(
             message="Agent created successfully",
             validation_results=ValidationResult(
                 valid=True,
-                warnings=[]
-            )
+                warnings=[],
+            ),
         )
     
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=str(e)
+            detail=str(e),
         )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create agent: {str(e)}"
+            detail=f"Failed to create agent: {e!s}",
         )
 
 
@@ -76,7 +83,7 @@ async def update_agent(
     agent_id: str,
     agent_data: AgentCreateRequest,
     request: Request,
-    _: bool = Depends(runtime_auth)
+    _: bool = Depends(runtime_auth),
 ) -> AgentResponse:
     """Update an existing agent."""
     try:
@@ -94,25 +101,25 @@ async def update_agent(
             message="Agent updated successfully",
             validation_results=ValidationResult(
                 valid=True,
-                warnings=[]
-            )
+                warnings=[],
+            ),
         )
     
     except ValueError as e:
         if "not found" in str(e):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=str(e)
+                detail=str(e),
             )
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(e)
+                detail=str(e),
             )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update agent: {str(e)}"
+            detail=f"Failed to update agent: {e!s}",
         )
 
 
@@ -120,7 +127,7 @@ async def update_agent(
 async def delete_agent(
     agent_id: str,
     request: Request,
-    _: bool = Depends(runtime_auth)
+    _: bool = Depends(runtime_auth),
 ) -> AgentResponse:
     """Delete an agent."""
     try:
@@ -134,25 +141,25 @@ async def delete_agent(
         return AgentResponse(
             success=True,
             agent_id=agent_id,
-            message="Agent deleted successfully"
+            message="Agent deleted successfully",
         )
     
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
+            detail=str(e),
         )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete agent: {str(e)}"
+            detail=f"Failed to delete agent: {e!s}",
         )
 
 
 @router.get("/v1/schema")
 async def get_schema(
     request: Request,
-    _: bool = Depends(runtime_auth)
+    _: bool = Depends(runtime_auth),
 ) -> SchemaResponse:
     """Get runtime schema."""
     try:
@@ -164,7 +171,7 @@ async def get_schema(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get schema: {str(e)}"
+            detail=f"Failed to get schema: {e!s}",
         )
 
 
@@ -172,7 +179,7 @@ async def get_schema(
 async def chat_completions(
     request_data: ChatCompletionRequest,
     request: Request,
-    _: bool = Depends(runtime_auth)
+    _: bool = Depends(runtime_auth),
 ) -> ChatCompletionResponse:
     """Execute agent chat completion."""
     try:
@@ -183,7 +190,7 @@ async def chat_completions(
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Agent {request_data.model} not found"
+                detail=f"Agent {request_data.model} not found",
             )
         
         # Handle streaming response
@@ -194,7 +201,7 @@ async def chat_completions(
                         messages=request_data.messages,
                         temperature=request_data.temperature,
                         max_tokens=request_data.max_tokens,
-                        metadata=getattr(request_data, 'metadata', None)
+                        metadata=getattr(request_data, "metadata", None),
                     ):
                         yield f"data: {chunk.model_dump_json()}\n\n"
                     
@@ -203,12 +210,12 @@ async def chat_completions(
                 
                 except Exception as e:
                     error_chunk = ChatCompletionChunk(
-                        id=f"chatcmpl-error",
+                        id="chatcmpl-error",
                         object="chat.completion.chunk",
                         created=int(time.time()),
                         model=request_data.model,
                         choices=[],
-                        error=str(e)
+                        error=str(e),
                     )
                     yield f"data: {error_chunk.model_dump_json()}\n\n"
             
@@ -218,8 +225,8 @@ async def chat_completions(
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "Content-Type": "text/plain; charset=utf-8"
-                }
+                    "Content-Type": "text/plain; charset=utf-8",
+                },
             )
         
         else:
@@ -229,14 +236,14 @@ async def chat_completions(
                 stream=False,
                 temperature=request_data.temperature,
                 max_tokens=request_data.max_tokens,
-                metadata=getattr(request_data, 'metadata', None)
+                metadata=getattr(request_data, "metadata", None),
             )
             
             # Update agent metrics
             runtime.agent_factory.update_agent_metrics(
                 request_data.model,
                 execution_time=0.0,  # Would be calculated from actual execution time
-                error=False
+                error=False,
             )
             
             return response
@@ -246,14 +253,14 @@ async def chat_completions(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to execute agent: {str(e)}"
+            detail=f"Failed to execute agent: {e!s}",
         )
 
 
 @router.get("/v1/health")
 async def health_check(
     request: Request,
-    _: bool = Depends(runtime_auth)
+    _: bool = Depends(runtime_auth),
 ) -> HealthResponse:
     """Comprehensive health check."""
     try:
@@ -270,23 +277,23 @@ async def health_check(
             HealthCheckItem(
                 service="runtime",
                 status="healthy" if health_status["initialized"] else "unhealthy",
-                details={"templates_loaded": health_status.get("templates_loaded", 0)}
+                details={"templates_loaded": health_status.get("templates_loaded", 0)},
             ),
             HealthCheckItem(
                 service="template_manager",
                 status="healthy" if health_status.get("templates_loaded", 0) > 0 else "degraded",
-                details={"template_count": health_status.get("templates_loaded", 0)}
+                details={"template_count": health_status.get("templates_loaded", 0)},
             ),
             HealthCheckItem(
                 service="agent_factory",
                 status="healthy",
-                details={"total_agents": health_status.get("total_agents", 0)}
+                details={"total_agents": health_status.get("total_agents", 0)},
             ),
             HealthCheckItem(
                 service="scheduler",
                 status="healthy",
-                details={"active_agents": health_status.get("active_agents", 0)}
-            )
+                details={"active_agents": health_status.get("active_agents", 0)},
+            ),
         ]
         
         # Determine overall status
@@ -301,7 +308,7 @@ async def health_check(
             uptime_seconds=uptime_seconds,
             total_agents=health_status.get("total_agents", 0),
             active_agents=health_status.get("active_agents", 0),
-            templates_loaded=health_status.get("templates_loaded", 0)
+            templates_loaded=health_status.get("templates_loaded", 0),
         )
         
         return HealthResponse(
@@ -309,7 +316,7 @@ async def health_check(
             timestamp=datetime.now().isoformat(),
             version="1.0.0",
             checks=health_items,
-            metrics=metrics
+            metrics=metrics,
         )
     
     except Exception as e:
@@ -322,15 +329,15 @@ async def health_check(
                 HealthCheckItem(
                     service="runtime",
                     status="unhealthy",
-                    details={"error": str(e)}
-                )
+                    details={"error": str(e)},
+                ),
             ],
             metrics=HealthMetrics(
                 uptime_seconds=int(time.time() - startup_time),
                 total_agents=0,
                 active_agents=0,
-                templates_loaded=0
-            )
+                templates_loaded=0,
+            ),
         )
 
 
@@ -340,7 +347,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     return ErrorResponse(
         error="HTTP_ERROR",
         message=exc.detail,
-        status_code=exc.status_code
+        status_code=exc.status_code,
     )
 
 
@@ -350,5 +357,5 @@ async def general_exception_handler(request: Request, exc: Exception):
     return ErrorResponse(
         error="INTERNAL_ERROR",
         message="An internal server error occurred",
-        details=str(exc) if settings.debug else None
+        details=str(exc) if settings.debug else None,
     ) 

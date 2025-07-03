@@ -1,17 +1,46 @@
 """Simple Test Agent Template - No external dependencies."""
 
-from typing import Dict, Any, List, Optional, AsyncGenerator
 import time
 import uuid
-from datetime import datetime
+from collections.abc import AsyncGenerator
+from enum import Enum
+from typing import Any, Optional
 
-from .base import BaseAgentTemplate, TemplateMetadata, ValidationResult
-from ..models import (
-    AgentType, ChatMessage, MessageRole, ChatCompletionRequest, 
-    ChatCompletionResponse, ChatCompletionChunk, ChatChoice, 
-    ChatUsage, FinishReason, AgentCreateRequest
+from pydantic import BaseModel, Field
+
+from runtime.models import (
+    AgentCreateRequest,
+    ChatChoice,
+    ChatCompletionChunk,
+    ChatCompletionResponse,
+    ChatMessage,
+    ChatUsage,
+    FinishReason,
+    MessageRole,
 )
+from runtime.template_agent.base import BaseAgentTemplate, ValidationResult
 
+
+class ResponseStyle(str, Enum):
+    """Response style options."""
+    FORMAL = "formal"
+    CASUAL = "casual"
+    TECHNICAL = "technical"
+    FRIENDLY = "friendly"
+
+
+class SimpleTestAgentConfig(BaseModel):
+    """Configuration for Simple Test Agent."""
+    response_prefix: str = Field(
+        default="Test: ",
+        description="Prefix for test responses",
+        min_length=1,
+        max_length=50
+    )
+    response_style: ResponseStyle = Field(
+        default=ResponseStyle.FRIENDLY,
+        description="Style of response to generate"
+    )
 
 class SimpleTestAgent(BaseAgentTemplate):
     """Simple test agent template for validation - no external dependencies."""
@@ -21,18 +50,10 @@ class SimpleTestAgent(BaseAgentTemplate):
     template_id: str = "simple-test"
     template_version: str = "1.0.0"
     template_description: str = "Simple test agent for system validation"
-    agent_type: AgentType = AgentType.CONVERSATION
     framework: str = "test"
     
     # Configuration schema (class variables)
-    config_schema: Dict[str, Any] = {
-        "response_prefix": {
-            "type": "string",
-            "default": "Test: ",
-            "description": "Prefix for test responses",
-            "order": 0
-        }
-    }
+    config_schema: type[BaseModel] = SimpleTestAgentConfig
     
     def __init__(self, agent_data: AgentCreateRequest):
         """Initialize the simple test agent."""
@@ -41,18 +62,28 @@ class SimpleTestAgent(BaseAgentTemplate):
         # Extract configuration
         self.response_prefix = self.template_config.get("response_prefix", "Test: ")
     
+    def _build_graph(self):
+        """Build the execution graph for simple test agent."""
+        # Simple test agent doesn't need a complex graph
+        # Return None for simplicity
+        return None
+    
     @classmethod
-    def validate_config(cls, config: Dict[str, Any]) -> ValidationResult:
+    def validate_config(cls, config: dict[str, Any]) -> ValidationResult:
         """Validate template configuration."""
-        return ValidationResult(valid=True, errors=[], warnings=[])
+        try:
+            cls.config_schema.model_validate(config)
+            return ValidationResult(valid=True, errors=[], warnings=[])
+        except Exception as e:
+            return ValidationResult(valid=False, errors=[str(e)], warnings=[])
     
     async def execute(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         stream: bool = False,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[dict[str, Any]] = None,
     ) -> ChatCompletionResponse:
         """Execute the simple test agent."""
         start_time = time.time()
@@ -75,24 +106,24 @@ class SimpleTestAgent(BaseAgentTemplate):
                     index=0,
                     message=ChatMessage(
                         role=MessageRole.ASSISTANT,
-                        content=response_content
+                        content=response_content,
                     ),
-                    finish_reason=FinishReason.STOP
-                )
+                    finish_reason=FinishReason.STOP,
+                ),
             ],
             usage=ChatUsage(
                 prompt_tokens=10,
                 completion_tokens=20,
-                total_tokens=30
-            )
+                total_tokens=30,
+            ),
         )
     
     async def stream_execute(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[dict[str, Any]] = None,
     ) -> AsyncGenerator[ChatCompletionChunk, None]:
         """Execute the simple test agent with streaming response."""
         start_time = time.time()
@@ -117,8 +148,8 @@ class SimpleTestAgent(BaseAgentTemplate):
                     {
                         "index": 0,
                         "delta": {"content": word + " " if i < len(words) - 1 else word},
-                        "finish_reason": None if i < len(words) - 1 else "stop"
-                    }
-                ]
+                        "finish_reason": None if i < len(words) - 1 else "stop",
+                    },
+                ],
             )
             yield chunk 

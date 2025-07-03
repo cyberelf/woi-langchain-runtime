@@ -1,11 +1,12 @@
 """Base Agent Template - Enhanced Agent with Template Metadata."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Type, Union
 from dataclasses import dataclass
-from pydantic import BaseModel
+from typing import Any, Optional
 
-from ..models import AgentCreateRequest, AgentType
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+from ..models import AgentCreateRequest
 
 
 @dataclass
@@ -15,17 +16,15 @@ class TemplateMetadata:
     template_id: str
     version: str
     description: str
-    agent_type: AgentType
-    config_schema: Dict[str, Any]
-    runtime_requirements: Dict[str, Any]
+    config_schema: type[BaseModel]
 
 
 @dataclass  
 class ValidationResult:
     """Template configuration validation result."""
     valid: bool
-    errors: List[str] = None
-    warnings: List[str] = None
+    errors: list[str] = None
+    warnings: list[str] = None
     
     def __post_init__(self):
         if self.errors is None:
@@ -47,18 +46,9 @@ class BaseAgentTemplate(ABC):
     template_id: str = "base-agent"
     template_version: str = "1.0.0"
     template_description: str = "Base agent template"
-    agent_type: AgentType = AgentType.CONVERSATION
     
     # Configuration Schema (class variable)
-    config_schema: Dict[str, Any] = {}
-    
-    # Runtime Requirements (class variable)
-    runtime_requirements: Dict[str, Any] = {
-        "memory": "256MB",
-        "cpu": "0.1 cores",
-        "gpu": False,
-        "estimatedLatency": "< 2s"
-    }
+    config_schema: type[BaseModel] = BaseModel
     
     @classmethod
     def get_metadata(cls) -> TemplateMetadata:
@@ -68,13 +58,11 @@ class BaseAgentTemplate(ABC):
             template_id=cls.template_id,
             version=cls.template_version,
             description=cls.template_description,
-            agent_type=cls.agent_type,
             config_schema=cls.config_schema,
-            runtime_requirements=cls.runtime_requirements
         )
     
     @classmethod
-    def validate_config(cls, config: Dict[str, Any]) -> ValidationResult:
+    def validate_config(cls, config: dict[str, Any]) -> ValidationResult:
         """
         Validate configuration against template schema.
         
@@ -84,35 +72,15 @@ class BaseAgentTemplate(ABC):
         warnings = []
         
         # Basic validation against schema
-        for field_name, field_schema in cls.config_schema.items():
-            if field_schema.get('required', False) and field_name not in config:
-                errors.append(f"Required field '{field_name}' is missing")
-            
-            if field_name in config:
-                value = config[field_name]
-                field_type = field_schema.get('type')
-                
-                # Type validation
-                if field_type == 'integer' and not isinstance(value, int):
-                    errors.append(f"Field '{field_name}' must be an integer")
-                elif field_type == 'boolean' and not isinstance(value, bool):
-                    errors.append(f"Field '{field_name}' must be a boolean")
-                elif field_type == 'string' and not isinstance(value, str):
-                    errors.append(f"Field '{field_name}' must be a string")
-                
-                # Range validation
-                if isinstance(value, (int, float)):
-                    min_val = field_schema.get('minimum')
-                    max_val = field_schema.get('maximum')
-                    if min_val is not None and value < min_val:
-                        errors.append(f"Field '{field_name}' must be >= {min_val}")
-                    if max_val is not None and value > max_val:
-                        errors.append(f"Field '{field_name}' must be <= {max_val}")
+        try:
+            cls.config_schema.model_validate(config)
+        except ValidationError as e:
+            errors.append(str(e))
         
         return ValidationResult(valid=len(errors) == 0, errors=errors, warnings=warnings)
     
     @classmethod
-    def create_instance(cls, agent_data: AgentCreateRequest) -> 'BaseAgentTemplate':
+    def create_instance(cls, agent_data: AgentCreateRequest) -> "BaseAgentTemplate":
         """
         Create agent instance from configuration.
         
@@ -156,7 +124,7 @@ class BaseAgentTemplate(ABC):
         pass
 
 
-def get_all_agent_templates() -> List[Type[BaseAgentTemplate]]:
+def get_all_agent_templates() -> list[type[BaseAgentTemplate]]:
     """
     Get all registered agent template classes using introspection.
     
@@ -172,7 +140,7 @@ def get_all_agent_templates() -> List[Type[BaseAgentTemplate]]:
     return list(get_subclasses(BaseAgentTemplate))
 
 
-def get_template_by_id(template_id: str) -> Optional[Type[BaseAgentTemplate]]:
+def get_template_by_id(template_id: str) -> Optional[type[BaseAgentTemplate]]:
     """Get agent template class by template ID."""
     for template_class in get_all_agent_templates():
         if template_class.template_id == template_id:
