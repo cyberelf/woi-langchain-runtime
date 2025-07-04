@@ -339,23 +339,3 @@ async def health_check(
                 templates_loaded=0,
             ),
         )
-
-
-@router.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    """Handle HTTP exceptions."""
-    return ErrorResponse(
-        error="HTTP_ERROR",
-        message=exc.detail,
-        status_code=exc.status_code,
-    )
-
-
-@router.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
-    """Handle general exceptions."""
-    return ErrorResponse(
-        error="INTERNAL_ERROR",
-        message="An internal server error occurred",
-        details=str(exc) if settings.debug else None,
-    ) 

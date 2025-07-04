@@ -1,14 +1,18 @@
 """Main application entry point for LangChain Agent Runtime."""
 
+
+
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import router as api_router
-from .config import settings
-from .core import AgentFactory, AgentScheduler, TemplateManager
+from runtime.api import router as api_router
+from runtime.config import settings
+from runtime.core import AgentFactory, AgentScheduler, TemplateManager
+from runtime.exception import general_exception_handler, http_exception_handler
+
 
 # Configure logging
 logging.basicConfig(
@@ -135,6 +139,10 @@ def create_app() -> FastAPI:
     
     # Include API router
     app.include_router(api_router)
+
+    # Register exception handlers
+    app.add_exception_handler(HTTPException, http_exception_handler)
+    app.add_exception_handler(Exception, general_exception_handler)
     
     # Add simple health check endpoints
     @app.get("/ping")

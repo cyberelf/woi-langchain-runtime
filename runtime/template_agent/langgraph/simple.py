@@ -18,7 +18,7 @@ from runtime.models import (
     FinishReason,
     MessageRole,
 )
-from runtime.template_agent.base import BaseAgentTemplate, ValidationResult
+from runtime.template_agent.langgraph.base import BaseLangGraphAgent
 
 
 class ResponseStyle(str, Enum):
@@ -42,7 +42,7 @@ class SimpleTestAgentConfig(BaseModel):
         description="Style of response to generate"
     )
 
-class SimpleTestAgent(BaseAgentTemplate):
+class SimpleTestAgent(BaseLangGraphAgent):
     """Simple test agent template for validation - no external dependencies."""
     
     # Template metadata (class variables)
@@ -68,19 +68,9 @@ class SimpleTestAgent(BaseAgentTemplate):
         # Return None for simplicity
         return None
     
-    @classmethod
-    def validate_config(cls, config: dict[str, Any]) -> ValidationResult:
-        """Validate template configuration."""
-        try:
-            cls.config_schema.model_validate(config)
-            return ValidationResult(valid=True, errors=[], warnings=[])
-        except Exception as e:
-            return ValidationResult(valid=False, errors=[str(e)], warnings=[])
-    
     async def execute(
         self,
         messages: list[ChatMessage],
-        stream: bool = False,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         metadata: Optional[dict[str, Any]] = None,

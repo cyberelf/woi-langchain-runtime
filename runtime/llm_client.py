@@ -1,8 +1,9 @@
 """LLM client for communicating with LLM Proxy service."""
 
 import json
+from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
-from typing import Any, Optional
+from typing import Any, Optional, Protocol
 
 import httpx
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -13,12 +14,39 @@ from .config import settings
 from .models import ChatMessage, MessageRole
 
 
+class LLMClient(Protocol):
+    """Protocol for LLM clients."""
+    
+    async def chat_completion(
+        self,
+        messages: list[ChatMessage],
+        llm_config_id: str,
+        stream: bool = False,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Send chat completion request."""
+        ...
+    
+    async def stream_chat_completion(
+        self,
+        messages: list[ChatMessage],
+        llm_config_id: str,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        **kwargs: Any,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """Stream chat completion."""
+        ...
+
+
 class LLMProxyClient:
     """Client for LLM Proxy service."""
     
-    def __init__(self) -> None:
-        self.proxy_url = settings.llm_proxy_url
-        self.proxy_token = settings.llm_proxy_token
+    def __init__(self, proxy_url: Optional[str] = None, proxy_token: Optional[str] = None) -> None:
+        self.proxy_url = proxy_url or settings.llm_proxy_url
+        self.proxy_token = proxy_token or settings.llm_proxy_token
         self.timeout = settings.llm_request_timeout
         self.client = httpx.AsyncClient(timeout=self.timeout)
     
@@ -142,9 +170,9 @@ class LLMProxyClient:
 class FallbackLLMClient:
     """Fallback LLM client using direct OpenAI integration."""
     
-    def __init__(self) -> None:
-        self.openai_api_key = settings.openai_api_key
-        self.openai_base_url = settings.openai_base_url
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None) -> None:
+        self.openai_api_key = api_key or settings.openai_api_key
+        self.openai_base_url = base_url or settings.openai_base_url
         
         if not self.openai_api_key:
             raise ValueError("OpenAI API key is required for fallback LLM client")
@@ -230,23 +258,16 @@ class FallbackLLMClient:
             raise RuntimeError(f"Fallback LLM request failed: {e}")
 
 
-class LLMClientManager:
+class LLMClientWithFallback:
     """Manager for LLM clients with fallback support."""
     
-    def __init__(self) -> None:
-        self.proxy_client: Optional[LLMProxyClient] = None
-        self.fallback_client: Optional[FallbackLLMClient] = None
-        
-        # Initialize proxy client if configured
-        if settings.llm_proxy_url:
-            self.proxy_client = LLMProxyClient()
-        
-        # Initialize fallback client if OpenAI key is available
-        if settings.openai_api_key:
-            try:
-                self.fallback_client = FallbackLLMClient()
-            except ValueError:
-                pass  # Fallback not available
+    def __init__(
+        self, 
+        proxy_client: Optional[LLMProxyClient] = None,
+        fallback_client: Optional[FallbackLLMClient] = None,
+    ) -> None:
+        self.proxy_client = proxy_client
+        self.fallback_client = fallback_client
     
     async def chat_completion(
         self,
@@ -338,5 +359,68 @@ class LLMClientManager:
         raise RuntimeError("No LLM client available for streaming")
 
 
-# Global LLM client manager
-llm_client = LLMClientManager() 
+class LLMClientFactory:
+    """Factory for creating LLM clients based on configuration."""
+    
+    def __init__(self) -> None:
+        self._default_client: Optional[LLMClientWithFallback] = None
+    
+    def create_default_client(self) -> LLMClient:
+        """Create a default LLM client manager."""
+        if self._default_client is None:
+            proxy_client = None
+            fallback_client = None
+            
+            # Initialize proxy client if configured
+            if settings.llm_proxy_url:
+                proxy_client = LLMProxyClient()
+            
+            # Initialize fallback client if OpenAI key is available
+            if settings.openai_api_key:
+                try:
+                    fallback_client = FallbackLLMClient()
+                except ValueError:
+                    pass  # Fallback not available
+            
+            self._default_client = LLMClientWithFallback(
+                proxy_client=proxy_client,
+                fallback_client=fallback_client,
+            )
+        
+        return self._default_client
+    
+    def create_proxy_client(
+        self, 
+        proxy_url: Optional[str] = None, 
+        proxy_token: Optional[str] = None,
+    ) -> LLMProxyClient:
+        """Create a proxy client with custom configuration."""
+        return LLMProxyClient(proxy_url=proxy_url, proxy_token=proxy_token)
+    
+    def create_fallback_client(
+        self, 
+        api_key: Optional[str] = None, 
+        base_url: Optional[str] = None,
+    ) -> FallbackLLMClient:
+        """Create a fallback client with custom configuration."""
+        return FallbackLLMClient(api_key=api_key, base_url=base_url)
+    
+    def create_client_for_llm_config(self, llm_config_id: str) -> LLMClient:
+        """Create an LLM client for specific configuration."""
+        # TODO: In the future, this could fetch specific LLM configuration
+        # from a database or configuration service based on llm_config_id
+        # For now, return the default client
+        return self.create_default_client()
+
+
+# Factory instance for dependency injection
+llm_client_factory = LLMClientFactory()
+
+
+def get_default_llm_client() -> LLMClient:
+    """Dependency provider for default LLM client."""
+    return llm_client_factory.create_default_client()
+
+def get_llm_client_factory() -> LLMClientFactory:
+    """Dependency provider for LLM client factory."""
+    return llm_client_factory

@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from runtime.llm_client import llm_client
+from runtime.llm_client import LLMClientFactory, LLMClientManager, get_default_llm_client
 from runtime.models import (
     AgentCreateRequest,
     ChatChoice,
@@ -18,7 +18,8 @@ from runtime.models import (
     FinishReason,
     MessageRole,
 )
-from runtime.template_agent.base import BaseAgentTemplate, ValidationResult
+from runtime.template_agent.base import ValidationResult
+from runtime.template_agent.langgraph.base import BaseLangGraphAgent
 
 
 class ConversationAgentConfig(BaseModel):
@@ -39,7 +40,7 @@ class ConversationAgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     
 
-class ConversationAgent(BaseAgentTemplate):
+class ConversationAgent(BaseLangGraphAgent):
     """Simple conversation agent template using direct LLM calls."""
 
     # Template metadata (class variables)
@@ -69,9 +70,9 @@ class ConversationAgent(BaseAgentTemplate):
         },
     }
 
-    def __init__(self, agent_data: AgentCreateRequest):
+    def __init__(self, agent_data: AgentCreateRequest, llm_client_factory: LLMClientFactory):
         """Initialize the conversation agent."""
-        super().__init__(agent_data)
+        super().__init__(agent_data, llm_client_factory)
 
         # Extract configuration
         self.max_history = self.template_config.get("max_history", 10)
@@ -140,7 +141,7 @@ class ConversationAgent(BaseAgentTemplate):
 
         try:
             # Call LLM
-            response = await llm_client.chat_completion(
+            response = await self.llm_client.chat_completion(
                 messages=conversation_messages,
                 llm_config_id=self.llm_config_id,
                 stream=False,
@@ -228,7 +229,7 @@ class ConversationAgent(BaseAgentTemplate):
         try:
             # For now, simulate streaming by yielding chunks
             # In a real implementation, this would use the LLM's streaming API
-            response = await llm_client.chat_completion(
+            response = await self.llm_client.chat_completion(
                 messages=conversation_messages,
                 llm_config_id=self.llm_config_id,
                 stream=False,

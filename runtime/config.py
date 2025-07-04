@@ -14,10 +14,10 @@ class Settings(BaseSettings):
     port: int = Field(default=8000, alias="PORT")
 
     # Authentication
-    runtime_token: str = Field(..., alias="RUNTIME_TOKEN")
+    runtime_token: str = Field(default="test_token", alias="RUNTIME_TOKEN")
 
     # LLM Proxy configuration
-    llm_proxy_url: str = Field(..., alias="LLM_PROXY_URL")
+    llm_proxy_url: Optional[str] = Field(default=None, alias="LLM_PROXY_URL")
     llm_proxy_token: Optional[str] = Field(default=None, alias="LLM_PROXY_TOKEN")
 
     # OpenAI configuration (fallback if LLM proxy not available)
