@@ -7,23 +7,17 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from runtime.llm_client import LLMClientFactory, LLMClientManager, get_default_llm_client
-from runtime.models import (
-    AgentCreateRequest,
-    ChatChoice,
-    ChatCompletionChunk,
-    ChatCompletionResponse,
-    ChatMessage,
-    ChatUsage,
-    FinishReason,
-    MessageRole,
-)
+
+from runtime.models import (AgentCreateRequest, ChatChoice,
+                            ChatCompletionChunk, ChatCompletionResponse,
+                            ChatMessage, ChatUsage, FinishReason, MessageRole)
 from runtime.template_agent.base import ValidationResult
 from runtime.template_agent.langgraph.base import BaseLangGraphAgent
 
 
 class ConversationAgentConfig(BaseModel):
     """Conversation agent configuration."""
+
     max_history: int = Field(
         default=10,
         ge=1,
@@ -38,7 +32,7 @@ class ConversationAgentConfig(BaseModel):
     )
 
     model_config = ConfigDict(extra="forbid")
-    
+
 
 class ConversationAgent(BaseLangGraphAgent):
     """Simple conversation agent template using direct LLM calls."""
@@ -70,9 +64,9 @@ class ConversationAgent(BaseLangGraphAgent):
         },
     }
 
-    def __init__(self, agent_data: AgentCreateRequest, llm_client_factory: LLMClientFactory):
+    def __init__(self, agent_data: AgentCreateRequest, llm_service=None, toolset_service=None):
         """Initialize the conversation agent."""
-        super().__init__(agent_data, llm_client_factory)
+        super().__init__(agent_data, llm_service, toolset_service)
 
         # Extract configuration
         self.max_history = self.template_config.get("max_history", 10)
@@ -96,15 +90,13 @@ class ConversationAgent(BaseLangGraphAgent):
 
         # Validate temperature
         temperature = config.get("temperature", 0.7)
-        if (
-            not isinstance(temperature, (int, float))
-            or temperature < 0
-            or temperature > 2
-        ):
+        if not isinstance(temperature, (int, float)) or temperature < 0 or temperature > 2:
             errors.append("temperature must be between 0 and 2")
 
         return ValidationResult(
-            valid=len(errors) == 0, errors=errors, warnings=warnings,
+            valid=len(errors) == 0,
+            errors=errors,
+            warnings=warnings,
         )
 
     async def execute(
@@ -141,59 +133,50 @@ class ConversationAgent(BaseLangGraphAgent):
 
         try:
             # Call LLM
-            response = await self.llm_client.chat_completion(
-                messages=conversation_messages,
-                llm_config_id=self.llm_config_id,
-                stream=False,
-                temperature=temp,
-                max_tokens=max_tokens,
+            llm_client = await self.get_llm_client()
+            response = await llm_client.ainvoke(conversation_messages)
+
+            # Extract response content from LangChain response
+            if hasattr(response, 'content'):
+                content = response.content
+            else:
+                content = str(response)
+
+            # Update conversation history
+            self.conversation_history.extend(messages)
+            self.conversation_history.append(
+                ChatMessage(role=MessageRole.ASSISTANT, content=content),
             )
 
-            # Extract response content
-            if response.get("choices") and len(response["choices"]) > 0:
-                content = response["choices"][0]["message"]["content"]
-                finish_reason = response["choices"][0].get("finish_reason", "stop")
+            # Trim history if needed
+            if len(self.conversation_history) > self.max_history * 2:
+                self.conversation_history = self.conversation_history[-self.max_history :]
 
-                # Update conversation history
-                self.conversation_history.extend(messages)
-                self.conversation_history.append(
-                    ChatMessage(role=MessageRole.ASSISTANT, content=content),
-                )
+            # Calculate metrics
+            total_time = time.time() - start_time
 
-                # Trim history if needed
-                if len(self.conversation_history) > self.max_history * 2:
-                    self.conversation_history = self.conversation_history[
-                        -self.max_history :
-                    ]
-
-                # Calculate metrics
-                total_time = time.time() - start_time
-
-                # Create response
-                return ChatCompletionResponse(
-                    id=completion_id,
-                    object="chat.completion",
-                    created=int(start_time),
-                    model=self.id,
-                    choices=[
-                        ChatChoice(
-                            index=0,
-                            message=ChatMessage(
-                                role=MessageRole.ASSISTANT, content=content,
-                            ),
-                            finish_reason=FinishReason(finish_reason),
+            # Create response
+            return ChatCompletionResponse(
+                id=completion_id,
+                object="chat.completion",
+                created=int(start_time),
+                model=self.id,
+                choices=[
+                    ChatChoice(
+                        index=0,
+                        message=ChatMessage(
+                            role=MessageRole.ASSISTANT,
+                            content=content,
                         ),
-                    ],
-                    usage=ChatUsage(
-                        prompt_tokens=response.get("usage", {}).get("prompt_tokens", 0),
-                        completion_tokens=response.get("usage", {}).get(
-                            "completion_tokens", 0,
-                        ),
-                        total_tokens=response.get("usage", {}).get("total_tokens", 0),
+                        finish_reason=FinishReason.STOP,
                     ),
-                )
-            else:
-                raise RuntimeError("No response from LLM")
+                ],
+                usage=ChatUsage(
+                    prompt_tokens=0,  # LangChain doesn't provide token counts by default
+                    completion_tokens=0,
+                    total_tokens=0,
+                ),
+            )
 
         except Exception as e:
             raise RuntimeError(f"Conversation execution failed: {e}")
@@ -227,24 +210,20 @@ class ConversationAgent(BaseLangGraphAgent):
         conversation_messages.extend(messages)
 
         try:
-            # For now, simulate streaming by yielding chunks
-            # In a real implementation, this would use the LLM's streaming API
-            response = await self.llm_client.chat_completion(
-                messages=conversation_messages,
+            # Get streaming LLM client
+            from runtime.llm import get_streaming_llm_client
+            streaming_llm_client = get_streaming_llm_client(
                 llm_config_id=self.llm_config_id,
-                stream=False,
                 temperature=temp,
                 max_tokens=max_tokens,
             )
-
-            if response.get("choices") and len(response["choices"]) > 0:
-                content = response["choices"][0]["message"]["content"]
-
-                # Simulate streaming by yielding words
-                words = content.split()
-                for i, word in enumerate(words):
-                    chunk_content = word + (" " if i < len(words) - 1 else "")
-
+            
+            # Use LangChain streaming
+            accumulated_content = ""
+            async for chunk in streaming_llm_client.astream(conversation_messages):
+                if hasattr(chunk, 'content') and chunk.content:
+                    accumulated_content += chunk.content
+                    
                     yield ChatCompletionChunk(
                         id=completion_id,
                         object="chat.completion.chunk",
@@ -253,26 +232,26 @@ class ConversationAgent(BaseLangGraphAgent):
                         choices=[
                             {
                                 "index": 0,
-                                "delta": {"content": chunk_content},
+                                "delta": {"content": chunk.content},
                                 "finish_reason": None,
                             },
                         ],
                     )
 
-                # Final chunk with finish reason
-                yield ChatCompletionChunk(
-                    id=completion_id,
-                    object="chat.completion.chunk",
-                    created=int(start_time),
-                    model=self.id,
-                    choices=[{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                )
+            # Final chunk with finish reason
+            yield ChatCompletionChunk(
+                id=completion_id,
+                object="chat.completion.chunk",
+                created=int(start_time),
+                model=self.id,
+                choices=[{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            )
 
-                # Update conversation history
-                self.conversation_history.extend(messages)
-                self.conversation_history.append(
-                    ChatMessage(role=MessageRole.ASSISTANT, content=content),
-                )
+            # Update conversation history
+            self.conversation_history.extend(messages)
+            self.conversation_history.append(
+                ChatMessage(role=MessageRole.ASSISTANT, content=accumulated_content),
+            )
 
         except Exception as e:
             # Yield error chunk

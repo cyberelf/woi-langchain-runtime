@@ -69,7 +69,7 @@ def test_create_agent(client, auth_headers):
         "system_prompt": "You are a test agent.",
         "llm_config_id": "test-llm-config",
     }
-    
+
     response = client.post("/v1/agents", json=agent_data, headers=auth_headers)
     assert response.status_code == 201
     data = response.json()
@@ -100,4 +100,4 @@ def test_invalid_token(client):
     """Test invalid token."""
     headers = {"X-Runtime-Token": "invalid-token"}
     response = client.get("/v1/schema", headers=headers)
-    assert response.status_code == 401 
+    assert response.status_code == 401

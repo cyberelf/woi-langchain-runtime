@@ -2,7 +2,7 @@
 
 This module provides the foundational interfaces and managers for:
 - Template discovery and management
-- Agent factory and lifecycle management  
+- Agent factory and lifecycle management
 - Framework-agnostic agent execution interfaces
 - Scheduler and resource management
 
@@ -18,15 +18,13 @@ from .template_manager import TemplateManager, TemplateRegistry
 __all__ = [
     # Template Management
     "TemplateManager",
-    "TemplateRegistry", 
+    "TemplateRegistry",
     "TemplateDiscovery",
     "DiscoveryInterface",
-    
     # Agent Factory
     "AgentFactory",
     "AgentFactoryInterface",
-    
     # Scheduling
-    "AgentScheduler", 
+    "AgentScheduler",
     "SchedulerInterface",
-] 
+]

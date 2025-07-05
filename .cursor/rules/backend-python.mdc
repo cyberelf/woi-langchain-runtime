@@ -43,7 +43,6 @@ The backend server implementation must adhere to these standards for consistency
 - Use Pydantic models for request/response bodies
 - Type hints must be used throughout the codebase
 - No use of `Any` type except in documented special cases
-- Utilize `Union`, `Optional`, and other typing extensions when appropriate
 - Run mypy for type checking as part of CI/CD pipeline
 
 ## Pydantic Models

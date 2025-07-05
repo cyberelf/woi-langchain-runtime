@@ -10,19 +10,27 @@ authors = [
     {name = "Darren Zhao", email = "guangyuzhao@hillstonenet.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
     "pydantic>=2.5.0",
-    "langchain>=0.1.0",
-    "langgraph>=0.0.20",
     "openai>=1.3.0",
     "httpx>=0.25.0",
     "python-multipart>=0.0.6",
     "semver>=3.0.0",
     "pydantic-settings>=2.10.1",
+    "mcp>=1.10.1",
+]
+
+[project.optional-dependencies]
+langgraph = [
     "langchain-openai>=0.3.27",
+    "langchain>=0.1.0",
+    "langgraph>=0.0.20",
+    "langchain-mcp-adapters>=0.1.8",
+    "langchain-google-genai>=2.1.6",
+    "langchain-deepseek>=0.1.3",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -34,7 +42,8 @@ dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.1.0",
-    "ruff>=0.1.0"
+    "ruff>=0.1.0",
+    "isort>=6.0.1",
 ]
 
 [tool.ruff]
@@ -43,7 +52,7 @@ lint.select = ["E", "F", "I", "UP"]
 lint.ignore = []
 lint.fixable = ["E501", "UP006"]
 exclude = [".venv", "build", "dist", "migrations"]
-target-version = "py39"
+target-version = "py311"
 
 [tool.ruff.format]
 quote-style = "double"

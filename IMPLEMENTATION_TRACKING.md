@@ -125,6 +125,46 @@ The core template-driven agent runtime system has been fully implemented and is 
    - ✅ Schema generation producing valid AgentTemplate instances
    - ✅ All affected modules updated and functional
 
+### ✅ Phase 1.7: LLM Utilities Simplification (COMPLETED)
+**Duration:** 1-2 hours  
+**Status:** Complete - Simplified LLM system using LangChain clients directly
+
+**Completed Tasks:**
+1. **Simple Utility Functions** ✅
+   - ✅ Created `get_llm_client()` utility function (`runtime/llm/__init__.py`)
+   - ✅ Added `get_default_llm_client()` for default configuration
+   - ✅ Implemented `get_streaming_llm_client()` for streaming support
+   - ✅ Used LangChain clients directly without wrapper interfaces
+
+2. **Template Integration** ✅
+   - ✅ Updated BaseAgentTemplate to use utility functions
+   - ✅ Added lazy loading of LLM clients with `get_llm_client()` method
+   - ✅ Updated agent template constructors for simplified service injection
+   - ✅ Fixed ConversationAgent to use LangChain response format directly
+   - ✅ Updated SimpleTestAgent for new approach
+   - ✅ Updated BaseLangGraphAgent for simplified integration
+
+3. **LangChain Integration** ✅
+   - ✅ Used `ChatOpenAI` clients directly from LangChain
+   - ✅ Updated response parsing to handle LangChain message objects
+   - ✅ Implemented proper streaming using LangChain's `astream()` method
+   - ✅ Removed complex wrapper interfaces in favor of direct usage
+
+4. **Module Cleanup** ✅
+   - ✅ Simplified main LLM module (`runtime/llm/__init__.py`) 
+   - ✅ Removed complex interface, service, and client wrapper files
+   - ✅ Kept simple LangGraph utilities module (`runtime/llm/langgraph.py`)
+   - ✅ Removed legacy module completely (no migration required)
+   - ✅ Clean implementation with no backward compatibility overhead
+
+**Key Improvements:**
+- **Simplicity**: Direct use of LangChain clients without abstraction overhead
+- **LangChain Native**: Proper integration with LangChain's async interfaces
+- **Streaming Support**: Real streaming using LangChain's native capabilities
+- **Minimal Dependencies**: Reduced complexity while maintaining functionality
+- **Easy Extension**: Simple utility pattern allows easy addition of new providers
+- **Framework Focus**: Optimized for LangGraph/LangChain ecosystem
+
 ### 🔄 Phase 2: Template Implementation (READY)
 **Duration:** 6-8 hours  
 **Status:** Ready to start - Core infrastructure complete
