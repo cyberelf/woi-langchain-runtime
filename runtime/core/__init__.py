@@ -1,30 +1,89 @@
-"""Core management interfaces for the Agent Runtime framework.
+"""Core foundational components for the Agent Runtime framework.
 
-This module provides the foundational interfaces and managers for:
-- Template discovery and management
-- Agent factory and lifecycle management
-- Framework-agnostic agent execution interfaces
-- Scheduler and resource management
+This module provides truly foundational, dependency-free components:
+- Core interfaces and abstractions
+- Base exception classes
+- Fundamental type definitions
 
-The design supports multiple underlying frameworks (LangChain, LangGraph, custom, etc.)
-through a pluggable architecture.
+Components that depend on other layers have been moved to:
+- Orchestration: runtime.orchestration (AgentFactory, AgentScheduler)
+- Templates: runtime.templates
+- Toolsets: runtime.toolsets
 """
 
-from .agent_factory import AgentFactory, AgentFactoryInterface
-from .discovery import DiscoveryInterface, TemplateDiscovery
-from .scheduler import AgentScheduler, SchedulerInterface
-from .template_manager import TemplateManager, TemplateRegistry
+from .interfaces import (
+    Initializable,
+    HealthCheckable,
+    Configurable,
+    BaseService,
+    BaseRepository,
+    BaseManager,
+)
+from .exceptions import (
+    RuntimeError,
+    ConfigurationError,
+    InitializationError,
+    ValidationError,
+    NotFoundError,
+    ConflictError,
+    ServiceUnavailableError,
+    TimeoutError,
+)
+from .types import (
+    AgentId,
+    SessionId,
+    TemplateId,
+    ToolsetId,
+    UserId,
+    ComponentStatus,
+    LogLevel,
+    Environment,
+    ConfigDict,
+    MetadataDict,
+    HeadersDict,
+    QueryParams,
+    HealthStatus,
+    HealthMetrics,
+    PaginationParams,
+    PaginatedResult,
+    ErrorDetails,
+    ErrorResponse,
+)
 
 __all__ = [
-    # Template Management
-    "TemplateManager",
-    "TemplateRegistry",
-    "TemplateDiscovery",
-    "DiscoveryInterface",
-    # Agent Factory
-    "AgentFactory",
-    "AgentFactoryInterface",
-    # Scheduling
-    "AgentScheduler",
-    "SchedulerInterface",
+    # Interfaces
+    "Initializable",
+    "HealthCheckable", 
+    "Configurable",
+    "BaseService",
+    "BaseRepository",
+    "BaseManager",
+    # Exceptions
+    "RuntimeError",
+    "ConfigurationError",
+    "InitializationError",
+    "ValidationError",
+    "NotFoundError",
+    "ConflictError",
+    "ServiceUnavailableError",
+    "TimeoutError",
+    # Types
+    "AgentId",
+    "SessionId",
+    "TemplateId",
+    "ToolsetId", 
+    "UserId",
+    "ComponentStatus",
+    "LogLevel",
+    "Environment",
+    "ConfigDict",
+    "MetadataDict",
+    "HeadersDict",
+    "QueryParams",
+    "HealthStatus",
+    "HealthMetrics",
+    "PaginationParams",
+    "PaginatedResult",
+    "ErrorDetails",
+    "ErrorResponse",
 ]

@@ -1,0 +1,55 @@
+---
+description: "High-level overview of the project's Domain-Driven Design (DDD) architecture, including layer responsibilities, key patterns, and entry points. Use this to understand the fundamental structure of the runtime."
+alwaysApply: false
+---
+
+# Domain-Driven Design (DDD) Project Architecture
+
+This document outlines the **Domain-Driven Design (DDD)** architecture for this project. Adhering to this structure is critical for maintaining code quality, scalability, and clarity.
+
+## Core Architectural Layers
+
+The architecture is strictly layered. Dependencies must only point inwards (e.g., Infrastructure can depend on Application, but Application CANNOT depend on Infrastructure). All paths are relative to the `runtime` directory.
+
+### 1. `domain` - The Domain Layer
+
+This is the heart of the application. It contains the core business logic, rules, and types, and has **zero dependencies** on any other layer or external framework.
+
+-   **Purpose**: To represent pure business concepts and enforce business rules.
+-   **[Entities](mdc:runtime/domain/entities)**: Rich domain objects with a distinct identity.
+-   **[Value Objects](mdc:runtime/domain/value_objects)**: Immutable objects that describe aspects of the domain.
+-   **[Repository Interfaces](mdc:runtime/domain/repositories)**: Abstract contracts (interfaces) for data persistence. The domain defines the "what", not the "how".
+-   **[Domain Events](mdc:runtime/domain/events)**: Represents significant business occurrences. Used to decouple different parts of the domain.
+-   **[Unit of Work Interface](mdc:runtime/domain/unit_of_work)**: A contract for managing atomic operations and transaction boundaries.
+
+### 2. `application` - The Application Layer
+
+This layer orchestrates the domain layer to perform specific use cases. It acts as a coordinator and does not contain any business logic itself.
+
+-   **Purpose**: To define and execute the application's use cases and manage transaction boundaries.
+-   **[Application Services](mdc:runtime/application/services)**: Contains the methods that execute specific use cases.
+-   **[Commands](mdc:runtime/application/commands)**: Formal, immutable requests to change the system's state. Follows the CQRS pattern.
+-   **[Queries](mdc:runtime/application/queries)**: Formal, immutable requests to read data from the system. Follows the CQRS pattern.
+-   **Dependencies**: This layer depends **only** on the `domain` layer.
+
+### 3. `infrastructure` - The Infrastructure Layer
+
+This layer provides concrete implementations for the contracts defined in the domain and application layers. It handles all external concerns.
+
+-   **Purpose**: To connect the application to the outside world (databases, web frameworks, external services).
+-   **[Web/API Layer](mdc:runtime/infrastructure/web)**: The primary entry point for the application. Contains the web framework implementation, including routes, DTOs, and dependency injection setup.
+-   **[Repository Implementations](mdc:runtime/infrastructure/repositories)**: Concrete implementations of the repository interfaces defined in the domain.
+-   **[Unit of Work Implementation](mdc:runtime/infrastructure/unit_of_work)**: The concrete implementation that manages transactions.
+-   **[Framework Integrations](mdc:runtime/infrastructure/frameworks)**: Contains all code specific to external frameworks, acting as a plugin system.
+
+## Entry Points & Execution Flow
+
+-   **Main Application Entry Point**: [main.py](mdc:main.py) is the top-level script to launch the server. It initializes the app from the infrastructure layer.
+-   **Web App Creation**: The core web app is created and configured in [runtime/infrastructure/web/main.py](mdc:runtime/infrastructure/web/main.py).
+
+## Key Patterns
+
+-   **CQRS (Command Query Responsibility Segregation)**: The application explicitly separates write operations (Commands) from read operations (Queries).
+-   **Unit of Work**: Manages atomic transactions, ensuring that a series of operations either all succeed or all fail together.
+-   **Repository**: Decouples the domain from data persistence mechanisms.
+-   **Dependency Injection**: Dependencies (like the Unit of Work) are injected into the services that need them, often managed by the web framework's DI container in [runtime/infrastructure/web/dependencies.py](mdc:runtime/infrastructure/web/dependencies.py).

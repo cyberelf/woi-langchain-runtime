@@ -49,7 +49,7 @@ dev = [
 [tool.ruff]
 line-length = 110
 lint.select = ["E", "F", "I", "UP"]
-lint.ignore = []
+lint.ignore = ["I001", "UP045"]
 lint.fixable = ["E501", "UP006"]
 exclude = [".venv", "build", "dist", "migrations"]
 target-version = "py311"

@@ -1,7 +1,5 @@
 ---
-description: 
-globs: *.py,ai-platform-backend/**/*
-alwaysApply: false
+alwaysApply: true
 ---
 # Python Backend Standards
 

@@ -1,0 +1,217 @@
+"""Main client SDK for LangChain Agent Runtime.
+
+This module provides a high-level client interface for interacting with
+the agent runtime via HTTP.
+"""
+
+import logging
+from typing import Any, AsyncGenerator, Dict, List, Optional
+import httpx
+from urllib.parse import urljoin
+
+from .models import (
+    AgentCreateRequest,
+    AgentInfo,
+    ChatMessage,
+    ChatCompletionResponse,
+    ChatCompletionChunk,
+    RuntimeStatus,
+    TemplateInfo,
+)
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_BASE_URL = "http://localhost:8000/api/v1/"
+
+
+class RuntimeClient:
+    """
+    High-level asynchronous client for the LangChain Agent Runtime API.
+    
+    This client provides convenient methods for:
+    - Listing and discovering templates
+    - Managing agent lifecycle
+    - Interactive chat sessions
+    - Runtime health monitoring
+    """
+
+    def __init__(self, base_url: str = DEFAULT_BASE_URL, timeout: float = 30.0):
+        """
+        Initialize the runtime client.
+        
+        Args:
+            base_url: The base URL of the runtime API.
+            timeout: Default timeout for HTTP requests.
+        """
+        self.base_url = base_url
+        self.http_client = httpx.AsyncClient(base_url=self.base_url, timeout=timeout)
+        self._status = RuntimeStatus.DISCONNECTED
+
+    async def shutdown(self) -> None:
+        """Shutdown the client and cleanup resources."""
+        await self.http_client.aclose()
+        self._status = RuntimeStatus.DISCONNECTED
+        logger.info("Runtime client shutdown complete")
+
+    @property
+    def status(self) -> RuntimeStatus:
+        """Get current runtime connection status."""
+        # In HTTP client, status is more about reachability.
+        # A proper implementation might ping the health endpoint.
+        return self._status
+
+    @property
+    def is_connected(self) -> bool:
+        """Check if runtime is considered connected."""
+        # This is simplified. A real check would involve a health check.
+        return self._status == RuntimeStatus.CONNECTED
+
+    async def _request(self, method: str, endpoint: str, **kwargs) -> httpx.Response:
+        """Helper method for making authenticated requests."""
+        try:
+            response = await self.http_client.request(method, endpoint, **kwargs)
+            response.raise_for_status()
+            # If request is successful, we can assume connection is fine
+            self._status = RuntimeStatus.CONNECTED
+            return response
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error for {e.request.method} {e.request.url}: {e.response.status_code} - {e.response.text}")
+            self._status = RuntimeStatus.ERROR
+            raise
+        except httpx.RequestError as e:
+            logger.error(f"Request error for {e.request.method} {e.request.url}: {e}")
+            self._status = RuntimeStatus.DISCONNECTED
+            raise
+
+    # Template Management Methods
+
+    async def list_templates(self, framework: Optional[str] = None) -> List[TemplateInfo]:
+        """List all available templates."""
+        params = {}
+        if framework:
+            params["framework"] = framework
+        
+        response = await self._request("GET", "templates/", params=params)
+        return [TemplateInfo(**t) for t in response.json()]
+
+    async def get_template(self, template_id: str, version: Optional[str] = None) -> Optional[TemplateInfo]:
+        """Get information about a specific template."""
+        endpoint = f"templates/{template_id}"
+        params = {}
+        if version:
+            params["version"] = version
+
+        try:
+            response = await self._request("GET", endpoint, params=params)
+            return TemplateInfo(**response.json())
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            raise
+
+    # Agent Management Methods
+
+    async def list_agents(self) -> List[AgentInfo]:
+        """List all existing agents."""
+        response = await self._request("GET", "agents/")
+        return [AgentInfo(**a) for a in response.json()]
+
+    async def get_agent(self, agent_id: str) -> Optional[AgentInfo]:
+        """Get information about a specific agent."""
+        try:
+            response = await self._request("GET", f"agents/{agent_id}")
+            return AgentInfo(**response.json())
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            raise
+
+    async def create_agent(self, agent_request: AgentCreateRequest) -> AgentInfo:
+        """Create a new agent."""
+        response = await self._request("POST", "agents/", json=agent_request.dict())
+        return AgentInfo(**response.json())
+
+    async def delete_agent(self, agent_id: str) -> bool:
+        """Delete an existing agent."""
+        try:
+            await self._request("DELETE", f"agents/{agent_id}")
+            return True
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return False
+            raise
+
+    # Interactive Chat Methods
+
+    async def chat_with_agent(
+        self,
+        agent_id: str,
+        messages: List[ChatMessage],
+        stream: bool = False
+    ) -> ChatCompletionResponse:
+        """Send messages to an agent and get a response."""
+        if stream:
+            raise NotImplementedError("Use stream_chat_with_agent for streaming responses.")
+
+        payload = {"messages": [msg.dict() for msg in messages]}
+        response = await self._request("POST", f"agents/{agent_id}/chat", json=payload)
+        return ChatCompletionResponse(**response.json())
+
+    async def stream_chat_with_agent(
+        self,
+        agent_id: str,
+        messages: List[ChatMessage]
+    ) -> AsyncGenerator[ChatCompletionChunk, None]:
+        """Stream chat response from an agent."""
+        payload = {"messages": [msg.dict() for msg in messages]}
+        async with self.http_client.stream("POST", f"agents/{agent_id}/chat/stream", json=payload) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    data = line[len("data: "):]
+                    if data.strip() == "[DONE]":
+                        break
+                    yield ChatCompletionChunk.parse_raw(data)
+
+    # Health and Status Methods
+
+    async def get_health_status(self) -> Dict[str, Any]:
+        """Get runtime health status."""
+        try:
+            response = await self._request("GET", "health/")
+            self._status = RuntimeStatus.CONNECTED
+            return response.json()
+        except Exception as e:
+            logger.error(f"Failed to get health status: {e}")
+            self._status = RuntimeStatus.ERROR
+            return {"status": "error", "detail": str(e)}
+
+
+# Convenience function for creating a client
+async def create_client(base_url: str = DEFAULT_BASE_URL) -> "RuntimeClient":
+    """
+    Create a runtime client.
+    
+    Args:
+        base_url: The base URL for the runtime API.
+
+    Returns:
+        A RuntimeClient instance.
+    """
+    return RuntimeClient(base_url=base_url)
+
+
+# Context manager for automatic cleanup
+class RuntimeClientContext:
+    """Context manager for automatic client initialization and cleanup."""
+    
+    def __init__(self, base_url: str = DEFAULT_BASE_URL):
+        self._client = RuntimeClient(base_url=base_url)
+    
+    async def __aenter__(self) -> "RuntimeClient":
+        # No explicit initialization needed anymore.
+        # The client is ready to make requests upon instantiation.
+        return self._client
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self._client.shutdown()

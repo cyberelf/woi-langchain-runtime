@@ -1,110 +1,178 @@
 #!/usr/bin/env python3
 """
-Command line example for using the Simple Test Agent.
+Command line example for using the Simple Test Agent with the new Client SDK.
 
-This demonstrates how to use the new template agent system with the simplified LLM interface.
+This demonstrates how to use the client SDK to interact with agents through
+the runtime system.
 """
 
 import asyncio
 import sys
 from typing import Optional
 
-from runtime.llm.langgraph import LangGraphLLMService, get_langgraph_llm_service
-from runtime.models import AgentCreateRequest, ChatMessage, MessageRole
-from runtime.template_agent.langgraph.simple import SimpleTestAgent
-from runtime.toolset.langgraph import get_toolset_service
+from client_sdk import RuntimeClientContext
+from runtime.infrastructure.web.models.requests import CreateAgentRequest as AgentCreateRequest
+from runtime.domain.value_objects import ChatMessage, MessageRole
 
 
 async def main():
-    """Run the simple agent CLI example."""
+    """Run the simple agent CLI example using the client SDK."""
     
-    # Create agent configuration
-    agent_data = AgentCreateRequest(
-        id="simple-test-example",
-        name="Simple Test CLI Agent",
-        description="A simple test agent for CLI demonstration",
-        type="simple-test",
-        template_id="simple-test",
-        template_version_id="1.0.0",
-        template_config={
-            "response_prefix": "🤖 ",
-            "system_prompt": "You are a helpful assistant that responds to user questions."
-        },
-        system_prompt="You are a helpful assistant that responds to user questions.",
-        llm_config_id="deepseek",
-        toolsets=[],
-        conversation_config={}
-    )
-
-    # get services
-    llm_service = get_langgraph_llm_service()
-    toolset_service = get_toolset_service()
-    
-    # Create agent instance
-    print("Creating Simple Test Agent...")
-    agent = SimpleTestAgent.create_instance(agent_data, llm_service, toolset_service)
-    
-    print(f"Agent created: {agent.name}")
-    print(f"Template: {agent.template_name} v{agent.template_version}")
-    print(f"Description: {agent.template_description}")
-    print()
-    
-    # Interactive CLI loop
-    print("Enter your messages (type 'exit' to quit, 'stream' to toggle streaming):")
-    print("=" * 50)
-    
-    streaming = False
-    conversation_history = []
-    
-    while True:
-        try:
-            # Get user input
-            user_input = input("\nYou: ").strip()
-            
-            if user_input.lower() == 'exit':
-                print("Goodbye!")
-                break
-            
-            if user_input.lower() == 'stream':
-                streaming = not streaming
-                print(f"Streaming mode: {'ON' if streaming else 'OFF'}")
-                continue
-            
-            if not user_input:
-                continue
-            
-            # Create message
-            message = ChatMessage(role=MessageRole.USER, content=user_input)
-            conversation_history.append(message)
-            
-            # Execute agent
-            print(f"\nAgent ({streaming and 'streaming' or 'standard'}):", end="")
-            
-            if streaming:
-                # Stream response
-                print(" ", end="")
-                async for chunk in agent.stream_execute(conversation_history):
-                    if chunk.choices and chunk.choices[0].get("delta", {}).get("content"):
-                        content = chunk.choices[0]["delta"]["content"]
-                        print(content, end="", flush=True)
-                print()  # New line after streaming
-            else:
-                # Regular response
-                response = await agent.execute(conversation_history)
-                content = response.choices[0].message.content
-                print(f" {content}")
-                
-                # Add response to history
-                conversation_history.append(
-                    ChatMessage(role=MessageRole.ASSISTANT, content=content)
-                )
+    async with RuntimeClientContext() as client:
+        print("🚀 Simple Agent CLI Example (using Client SDK)")
+        print("=" * 60)
         
-        except KeyboardInterrupt:
-            print("\nExiting...")
-            break
-        except Exception as e:
-            print(f"\nError: {e}")
-            print("Please try again.")
+        # List available templates
+        print("\n📋 Available Templates:")
+        templates = await client.list_templates()
+        for template in templates:
+            print(f"  • {template.template_id} v{template.version} ({template.framework})")
+            print(f"    {template.description}")
+        
+        print(f"\nFound {len(templates)} template(s)")
+        
+        # Check if we have the simple-test template
+        simple_template = None
+        for template in templates:
+            if template.template_id == "simple-test":
+                simple_template = template
+                break
+        
+        if not simple_template:
+            print("\n❌ Simple test template not found. Creating agent with default template...")
+            # Use the first available template as fallback
+            if templates:
+                simple_template = templates[0]
+                print(f"   Using template: {simple_template.template_id}")
+            else:
+                print("❌ No templates available. Cannot proceed.")
+                return
+        
+        # Check existing agents
+        print(f"\n🤖 Existing Agents:")
+        agents = await client.list_agents()
+        if agents:
+            for agent in agents:
+                print(f"  • {agent.agent_id} ({agent.name}) - {agent.template_id}")
+        else:
+            print("  No existing agents found")
+        
+        # Create or use existing agent
+        agent_id = "simple-test-example"
+        existing_agent = None
+        
+        for agent in agents:
+            if agent.agent_id == agent_id:
+                existing_agent = agent
+                break
+        
+        if existing_agent:
+            print(f"\n✅ Using existing agent: {existing_agent.name}")
+            agent_info = existing_agent
+        else:
+            print(f"\n🔧 Creating new agent...")
+            
+            # Create agent configuration
+            agent_data = AgentCreateRequest(
+                id=agent_id,
+                name="Simple Test CLI Agent",
+                description="A simple test agent for CLI demonstration",
+                type=simple_template.template_id,
+                template_id=simple_template.template_id,
+                template_version_id=simple_template.version,
+                template_config={
+                    "response_prefix": "🤖 ",
+                    "system_prompt": "You are a helpful assistant that responds to user questions."
+                },
+                system_prompt="You are a helpful assistant that responds to user questions.",
+                llm_config_id="deepseek",
+                toolsets=[],
+                conversation_config={}
+            )
+            
+            # Create agent using client SDK
+            agent_info = await client.create_agent(agent_data)
+            print(f"✅ Agent created: {agent_info.name}")
+        
+        print(f"\n🎯 Agent Details:")
+        print(f"   ID: {agent_info.agent_id}")
+        print(f"   Name: {agent_info.name}")
+        print(f"   Template: {agent_info.template_id} v{agent_info.template_version}")
+        print(f"   Status: {agent_info.status}")
+        
+        # Interactive CLI loop
+        print(f"\n💬 Interactive Chat Session")
+        print("Commands:")
+        print("  'exit' - Exit the chat")
+        print("  'stream' - Toggle streaming mode")
+        print("  'clear' - Clear conversation history")
+        print("=" * 60)
+        
+        streaming = False
+        conversation_history = []
+        
+        while True:
+            try:
+                # Get user input
+                user_input = input(f"\n{'You'}: ").strip()
+                
+                if user_input.lower() == 'exit':
+                    print("👋 Goodbye!")
+                    break
+                
+                if user_input.lower() == 'stream':
+                    streaming = not streaming
+                    print(f"🌊 Streaming mode: {'ON' if streaming else 'OFF'}")
+                    continue
+                
+                if user_input.lower() == 'clear':
+                    conversation_history = []
+                    print("🧹 Conversation history cleared")
+                    continue
+                
+                if not user_input:
+                    continue
+                
+                # Create message
+                message = ChatMessage(role=MessageRole.USER, content=user_input)
+                conversation_history.append(message)
+                
+                # Execute agent using client SDK
+                agent_name = agent_info.name
+                
+                if streaming:
+                    # Stream response
+                    print(f"{agent_name}: ", end="")
+                    response_content = ""
+                    async for chunk in client.stream_chat_with_agent(agent_info.agent_id, conversation_history):
+                        if chunk.choices and chunk.choices[0].get("delta", {}).get("content"):
+                            content = chunk.choices[0]["delta"]["content"]
+                            response_content += content
+                            print(content, end="", flush=True)
+                    print()  # New line after streaming
+                    
+                    # Add response to history
+                    if response_content:
+                        conversation_history.append(
+                            ChatMessage(role=MessageRole.ASSISTANT, content=response_content)
+                        )
+                else:
+                    # Regular response
+                    response = await client.chat_with_agent(agent_info.agent_id, conversation_history)
+                    content = response.choices[0].message.content
+                    print(f"{agent_name}: {content}")
+                    
+                    # Add response to history
+                    conversation_history.append(
+                        ChatMessage(role=MessageRole.ASSISTANT, content=content)
+                    )
+            
+            except KeyboardInterrupt:
+                print("\n\n👋 Exiting...")
+                break
+            except Exception as e:
+                print(f"\n❌ Error: {e}")
+                print("Please try again.")
 
 
 if __name__ == "__main__":
