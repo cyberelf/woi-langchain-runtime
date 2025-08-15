@@ -1,7 +1,7 @@
 """Domain events - Pure domain concepts."""
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Any, Dict
 
 from ..value_objects.agent_id import AgentId
@@ -20,7 +20,7 @@ class DomainEvent:
         """Create event with timestamp."""
         import uuid
         return cls(
-            occurred_at=datetime.utcnow(),
+            occurred_at=datetime.now(UTC),
             event_id=str(uuid.uuid4()),
             **kwargs
         )
@@ -39,7 +39,7 @@ class AgentCreated(DomainEvent):
         """Create AgentCreated event."""
         import uuid
         return cls(
-            occurred_at=datetime.utcnow(),
+            occurred_at=datetime.now(UTC),
             event_id=str(uuid.uuid4()),
             agent_id=agent_id,
             agent_name=agent_name,
@@ -60,7 +60,7 @@ class AgentStatusChanged(DomainEvent):
         """Create AgentStatusChanged event."""
         import uuid
         return cls(
-            occurred_at=datetime.utcnow(),
+            occurred_at=datetime.now(UTC),
             event_id=str(uuid.uuid4()),
             agent_id=agent_id,
             old_status=old_status,
@@ -81,7 +81,7 @@ class SessionStarted(DomainEvent):
         """Create SessionStarted event."""
         import uuid
         return cls(
-            occurred_at=datetime.utcnow(),
+            occurred_at=datetime.now(UTC),
             event_id=str(uuid.uuid4()),
             session_id=session_id,
             agent_id=agent_id,
@@ -102,7 +102,7 @@ class MessageAdded(DomainEvent):
         """Create MessageAdded event."""
         import uuid
         return cls(
-            occurred_at=datetime.utcnow(),
+            occurred_at=datetime.now(UTC),
             event_id=str(uuid.uuid4()),
             session_id=session_id,
             message_role=message_role,

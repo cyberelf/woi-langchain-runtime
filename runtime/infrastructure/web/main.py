@@ -1,13 +1,14 @@
-"""DDD-compliant main application - Infrastructure layer."""
+"""DDD-compliant main application with async task management - Infrastructure layer."""
 
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import agent_routes
-from ..unit_of_work.in_memory_uow import TransactionalInMemoryUnitOfWork
+from .routes import agent_routes, execution_routes
+from .dependencies import startup_dependencies, shutdown_dependencies, get_architecture_info
+from ...auth import runtime_auth
 
 # Configure logging
 logging.basicConfig(
@@ -20,25 +21,39 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager."""
+    """Application lifespan manager with task management initialization."""
     # Startup
-    logger.info("Starting DDD Agent Runtime...")
+    logger.info("Starting Agent Runtime with async task management...")
     
-    # Initialize infrastructure components
-    # (In a real application, this would initialize database connections, etc.)
+    try:
+        # Initialize new task management architecture
+        dependencies = await startup_dependencies()
+        logger.info("Task management architecture initialized successfully")
+        
+        # Store dependencies in app state for health checks
+        app.state.dependencies = dependencies
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize task management: {e}")
+        raise
     
     yield
     
     # Shutdown
-    logger.info("Shutting down DDD Agent Runtime...")
+    logger.info("Shutting down Agent Runtime...")
+    try:
+        await shutdown_dependencies()
+        logger.info("Task management architecture shutdown complete")
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
 
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
         title="Agent Runtime API",
-        description="DDD-compliant agent runtime service",
-        version="2.0.0",
+        description="Agent runtime service with async task management",
+        version="2.1.0",
         lifespan=lifespan
     )
     
@@ -53,14 +68,116 @@ def create_app() -> FastAPI:
     
     # Include routers
     app.include_router(agent_routes.router)
+    app.include_router(execution_routes.router)
     
-    @app.get("/health")
-    async def health_check():
-        """Health check endpoint."""
+    @app.get("/")
+    async def root():
+        """Root endpoint."""
         return {
+            "service": "Agent Runtime Service",
+            "version": "2.1.0",
+            "architecture": "DDD + Async Task Management",
+            "features": get_architecture_info()["features"]
+        }
+    
+    @app.get("/ping")
+    async def ping():
+        """Ping endpoint."""
+        return {
+            "status": "ok",
+            "message": "pong",
+            "architecture": "async_task_management"
+        }
+    
+    @app.get("/v1/health")
+    async def health_check(_: bool = Depends(runtime_auth)):
+        """Health check endpoint with task management status."""
+        base_health = {
             "status": "healthy",
-            "version": "2.0.0",
-            "architecture": "DDD"
+            "version": "2.1.0",
+            "architecture": "DDD + Async Task Management",
+            "timestamp": "2024-03-20T10:00:00Z"
+        }
+        
+        # Add architecture info
+        base_health.update(get_architecture_info())
+        
+        # Add task manager health if available
+        if hasattr(app.state, 'dependencies'):
+            deps = app.state.dependencies
+            if 'task_manager' in deps:
+                task_manager = deps['task_manager']
+                base_health['task_manager'] = {
+                    "running": task_manager._running,
+                    "workers": len(task_manager._task_workers),
+                    "active_instances": len(task_manager._agent_instances),
+                    "running_tasks": len(task_manager._running_tasks)
+                }
+        
+        return base_health
+    
+    @app.get("/v1/schema")
+    async def get_schema(_: bool = Depends(runtime_auth)):
+        """Get runtime schema endpoint."""
+        return {
+            "version": "2.1.0",
+            "lastUpdated": "2024-03-20T10:00:00Z",
+            "architecture": "async_task_management",
+            "supportedAgentTemplates": [
+                {
+                    "template_name": "智能客服助手",
+                    "template_id": "customer-service-bot",
+                    "version": "1.0.0",
+                    "type": "conversation",
+                    "configSchema": {
+                        "template_name": "智能客服助手",
+                        "template_id": "customer-service-bot",
+                        "sections": [
+                            {
+                                "id": "conversation",
+                                "title": "对话设置",
+                                "description": "配置智能体的对话行为",
+                                "fields": [
+                                    {
+                                        "id": "continuous",
+                                        "type": "checkbox",
+                                        "label": "持续对话模式",
+                                        "description": "启用持续对话以保持上下文连贯性",
+                                        "defaultValue": True
+                                    },
+                                    {
+                                        "id": "historyLength",
+                                        "type": "number",
+                                        "label": "对话历史长度",
+                                        "description": "保留的最大历史消息数量",
+                                        "defaultValue": 10,
+                                        "validation": {
+                                            "min": 5,
+                                            "max": 100
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "capabilities": {
+                "streaming": True,
+                "toolCalling": True,
+                "multimodal": False,
+                "codeExecution": True,
+                "sessionManagement": True,
+                "asyncExecution": True,
+                "horizontalScaling": True
+            },
+            "limits": {
+                "maxConcurrentAgents": 100,
+                "maxMessageLength": 32000,
+                "maxConversationHistory": 100,
+                "maxTaskWorkers": 50,
+                "sessionTimeoutSeconds": 7200
+            }
         }
     
     return app

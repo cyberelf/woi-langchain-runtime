@@ -1,7 +1,7 @@
 """Chat message value object - Pure domain model."""
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, UTC
 from enum import Enum
 from typing import Dict, Any, Optional
 
@@ -44,7 +44,7 @@ class ChatMessage:
         return cls(
             role=MessageRole.USER,
             content=content,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             metadata=metadata or {}
         )
     
@@ -54,7 +54,7 @@ class ChatMessage:
         return cls(
             role=MessageRole.ASSISTANT,
             content=content,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             metadata=metadata or {}
         )
     
@@ -64,7 +64,7 @@ class ChatMessage:
         return cls(
             role=MessageRole.SYSTEM,
             content=content,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             metadata=metadata or {}
         )
     
@@ -79,3 +79,12 @@ class ChatMessage:
     def is_system_message(self) -> bool:
         """Check if this is a system message."""
         return self.role == MessageRole.SYSTEM
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "role": self.role.value,
+            "content": self.content,
+            "timestamp": self.timestamp.isoformat(),
+            "metadata": self.metadata
+        }

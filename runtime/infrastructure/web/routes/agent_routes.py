@@ -1,7 +1,6 @@
 """Agent management routes - Infrastructure layer."""
 
 import logging
-from typing import List
 from fastapi import APIRouter, HTTPException, Depends, status
 
 from ....application.commands.create_agent_command import CreateAgentCommand
@@ -9,48 +8,49 @@ from ....application.services.create_agent_service import CreateAgentService
 from ....application.services.query_agent_service import QueryAgentService
 from ....application.queries.get_agent_query import GetAgentQuery, ListAgentsQuery
 from ....domain.value_objects.agent_id import AgentId
-from ..models.requests import CreateAgentRequest, ListAgentsRequest
-from ..models.responses import AgentResponse, ErrorResponse
+from ..models.requests import CreateAgentRequest
+from ..models.responses import AgentResponse, CreateAgentResponse
 from ..dependencies import get_create_agent_service, get_query_agent_service
+from ....auth import runtime_auth
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/agents", tags=["agents"])
 
 
-@router.post("/", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=CreateAgentResponse, status_code=status.HTTP_201_CREATED)
 async def create_agent(
     request: CreateAgentRequest,
-    service: CreateAgentService = Depends(get_create_agent_service)
-) -> AgentResponse:
+    service: CreateAgentService = Depends(get_create_agent_service),
+    _: bool = Depends(runtime_auth)
+) -> CreateAgentResponse:
     """Create a new agent.
     
     Creates an agent configuration that can be used for chat execution.
     """
     try:
+        # Parse request into structured models for better separation of concerns
+        identity = request.get_identity()
+        template = request.get_template()
+        config = request.get_agent_configuration()
+        
         # Convert HTTP request to domain command
         command = CreateAgentCommand(
-            name=request.name,
-            template_id=request.template_id,
-            configuration=request.configuration,
-            template_version=request.template_version,
-            metadata=request.metadata
+            name=identity.name,
+            template_id=template.template_id,
+            configuration=config.get_configuration(),
+            template_version=template.get_template_version(),
+            metadata=request.get_metadata(),
+            agent_id=identity.id
         )
         
         # Execute use case
         agent = await service.execute(command)
         
         # Convert domain entity to HTTP response
-        return AgentResponse(
-            id=agent.id.value,
-            name=agent.name,
-            template_id=agent.template_id,
-            template_version=agent.template_version,
-            status=agent.status.value,
-            configuration=agent.configuration,
-            created_at=agent.created_at,
-            updated_at=agent.updated_at,
-            metadata=agent.metadata
+        return CreateAgentResponse(
+            success=True,
+            agent_id=agent.id.value
         )
         
     except ValueError as e:
@@ -70,7 +70,8 @@ async def create_agent(
 @router.get("/{agent_id}", response_model=AgentResponse)
 async def get_agent(
     agent_id: str,
-    service: QueryAgentService = Depends(get_query_agent_service)
+    service: QueryAgentService = Depends(get_query_agent_service),
+    _: bool = Depends(runtime_auth)
 ) -> AgentResponse:
     """Get an agent by ID."""
     try:
@@ -114,14 +115,15 @@ async def get_agent(
         )
 
 
-@router.get("/", response_model=List[AgentResponse])
+@router.get("/", response_model=list[AgentResponse])
 async def list_agents(
     template_id: str = None,
     active_only: bool = False,
     limit: int = None,
     offset: int = 0,
-    service: QueryAgentService = Depends(get_query_agent_service)
-) -> List[AgentResponse]:
+    service: QueryAgentService = Depends(get_query_agent_service),
+    _: bool = Depends(runtime_auth)
+) -> list[AgentResponse]:
     """List agents with optional filtering."""
     try:
         # Convert HTTP parameters to domain query

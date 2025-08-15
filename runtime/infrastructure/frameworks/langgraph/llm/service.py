@@ -3,9 +3,12 @@
 This module provides utilities for LangGraph-based agent templates.
 """
 
+from abc import ABC, abstractmethod
+
+from runtime.domain.services.llm.llm_service import LLMService, LLMClient
+from runtime.llm.mcp_client import McpLLMClient
 from langchain_deepseek import ChatDeepSeek
 from langchain_google_genai import ChatGoogleGenerativeAI
-from ....llm.service import LLMService
 from langchain_openai import ChatOpenAI
 
 class LangGraphLLMService(LLMService):

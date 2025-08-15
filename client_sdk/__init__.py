@@ -18,16 +18,17 @@ Example usage:
 
 from .client import RuntimeClient, RuntimeClientContext, create_client
 from .models import (
-    AgentCreateRequest,
     AgentInfo,
-    AgentResponse,
     ChatMessage,
-    ChatCompletionChunk,
+    ChatChoice,
+    ChatCompletionChoice,  # Alias
     ChatCompletionResponse,
+    ChatCompletionChunk,
+    ChatUsage,
     MessageRole,
-    RuntimeStatus,
     TemplateInfo,
-    ValidationResult,
+    RuntimeStatus,
+    CreateAgentRequest,
 )
 
 __version__ = "1.0.0"
@@ -39,14 +40,15 @@ __all__ = [
     "create_client",
     
     # Models
-    "AgentCreateRequest",
     "AgentInfo",
-    "AgentResponse",
     "ChatMessage",
-    "ChatCompletionChunk",
+    "ChatChoice",
+    "ChatCompletionChoice",  # Alias
     "ChatCompletionResponse",
+    "ChatCompletionChunk",
+    "ChatUsage",
     "MessageRole",
-    "RuntimeStatus",
     "TemplateInfo",
-    "ValidationResult",
+    "RuntimeStatus",
+    "CreateAgentRequest",
 ]

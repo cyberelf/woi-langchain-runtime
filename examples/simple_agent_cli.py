@@ -11,8 +11,8 @@ import sys
 from typing import Optional
 
 from client_sdk import RuntimeClientContext
-from runtime.infrastructure.web.models.requests import CreateAgentRequest as AgentCreateRequest
-from runtime.domain.value_objects import ChatMessage, MessageRole
+from runtime.infrastructure.web.models.requests import CreateAgentRequest
+from runtime.domain.value_objects.chat_message import ChatMessage, MessageRole
 
 
 async def main():
@@ -73,7 +73,7 @@ async def main():
             print(f"\n🔧 Creating new agent...")
             
             # Create agent configuration
-            agent_data = AgentCreateRequest(
+            agent_data = CreateAgentRequest(
                 id=agent_id,
                 name="Simple Test CLI Agent",
                 description="A simple test agent for CLI demonstration",
@@ -87,7 +87,9 @@ async def main():
                 system_prompt="You are a helpful assistant that responds to user questions.",
                 llm_config_id="deepseek",
                 toolsets=[],
-                conversation_config={}
+                conversation_config={},
+                agent_line_id=agent_id,  # Required field
+                owner_id="cli-example"  # Required field
             )
             
             # Create agent using client SDK

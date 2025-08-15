@@ -1,7 +1,7 @@
 """Client SDK data models."""
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional, Union
+from dataclasses import dataclass
+from typing import Optional
 from pydantic import BaseModel, Field
 from enum import Enum
 
@@ -22,14 +22,39 @@ class ChatMessage(BaseModel):
 
 
 # API Request Models
-class AgentCreateRequest(BaseModel):
-    """Request model for creating a new agent."""
-    id: str = Field(..., description="Unique identifier for the agent.")
-    name: str = Field(..., description="A human-readable name for the agent.")
-    description: Optional[str] = Field(None, description="A brief description of the agent's purpose.")
-    template_id: str = Field(..., description="The ID of the template to use for this agent.")
-    template_version: Optional[str] = Field(None, description="The version of the aplate to use.")
-    config: Optional[Dict[str, Any]] = Field(None, description="Configuration overrides for the agent.")
+class CreateAgentRequest(BaseModel):
+    """Request model for creating a new agent - matches API specification."""
+    # Core fields - following API specification
+    id: str = Field(..., description="Agent line ID (logical identifier)")
+    name: str = Field(..., description="Agent name")
+    description: Optional[str] = Field(None, description="Agent description")
+    avatar_url: Optional[str] = Field(None, description="Agent avatar URL")
+    type: str = Field(..., description="Agent type")
+    
+    # Template fields - following API specification
+    template_id: str = Field(..., description="Template type identifier")
+    template_version: Optional[str] = Field(None, description="The version of the template to use.")
+    template_version_id: str = Field(..., description="Template version string")
+    
+    # Configuration fields
+    system_prompt: Optional[str] = Field(None, description="System prompt")
+    conversation_config: Optional[dict] = Field(None, description="Conversation configuration")
+    toolsets: Optional[list[str]] = Field(None, description="Available toolsets")
+    llm_config_id: Optional[str] = Field(None, description="LLM configuration ID")
+    template_config: Optional[dict] = Field(None, description="Template configuration")
+
+    # Metadata - following API specification
+    agent_line_id: str = Field(..., description="Agent line ID")
+    version_type: Optional[str] = Field("beta", description="Version type: beta or release (default: beta)")
+    version_number: Optional[str] = Field("v1", description="Version number: 'v1', 'v2', etc. (default: v1)")
+    owner_id: str = Field(..., description="Agent owner ID for beta access control")
+    status: Optional[str] = Field(
+        "draft", 
+        description="Agent status: draft, submitted, pending, published, revoked (default: draft)"
+    )
+
+# Backward compatibility alias
+AgentCreateRequest = CreateAgentRequest
 
 
 # API Response Models
@@ -41,7 +66,7 @@ class TemplateInfo:
     version: str
     framework: str
     description: str
-    metadata: Dict[str, Any]
+    metadata: dict
 
 
 @dataclass
@@ -56,22 +81,32 @@ class AgentInfo:
     created_at: str
 
 
-class ChatCompletionChoice(BaseModel):
+class ChatChoice(BaseModel):
     """A single choice in a chat completion response."""
     index: int
     message: ChatMessage
     finish_reason: Optional[str] = None
 
+# Alias for backward compatibility
+ChatCompletionChoice = ChatChoice
+
+
+class ChatUsage(BaseModel):
+    """Token usage statistics."""
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
 
 class ChatCompletionResponse(BaseModel):
     """Response model for a non-streaming chat completion."""
     id: str
-    choices: List[ChatCompletionChoice]
+    choices: list[ChatChoice]
     created: int
     model: str
     object: str = "chat.completion"
-    system_fingerprint: str
-    usage: Dict[str, int]
+    system_fingerprint: Optional[str] = None
+    usage: ChatUsage
 
 
 class ChatCompletionChunkChoice(BaseModel):
@@ -84,7 +119,7 @@ class ChatCompletionChunkChoice(BaseModel):
 class ChatCompletionChunk(BaseModel):
     """A chunk of a streaming chat completion response."""
     id: str
-    choices: List[ChatCompletionChunkChoice]
+    choices: list[ChatCompletionChunkChoice]
     created: int
     model: str
     object: str = "chat.completion.chunk"
@@ -100,11 +135,15 @@ class RuntimeStatus(Enum):
 
 
 __all__ = [
-    "AgentCreateRequest",
+    "CreateAgentRequest",
+    "AgentCreateRequest",  # Backward compatibility alias
     "AgentInfo",
     "ChatMessage",
+    "ChatChoice",
+    "ChatCompletionChoice",  # Alias
     "ChatCompletionResponse",
     "ChatCompletionChunk",
+    "ChatUsage",
     "MessageRole",
     "TemplateInfo",
     "RuntimeStatus",

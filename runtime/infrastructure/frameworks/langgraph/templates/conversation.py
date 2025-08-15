@@ -9,15 +9,21 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 # Updated imports for DDD structure
-from ....domain.value_objects.chat_message import ChatMessage, MessageRole
-from ...web.models.requests import CreateAgentRequest as AgentCreateRequest
-from ...web.models.responses import (
-    ChatChoice, StreamingChunk as ChatCompletionChunk, 
-    ExecuteAgentResponse as ChatCompletionResponse, ChatUsage
+from runtime.domain.value_objects.chat_message import ChatMessage, MessageRole
+from runtime.infrastructure.web.models.requests import CreateAgentRequest
+from runtime.infrastructure.web.models.responses import (
+    ChatChoice,
+    ChatCompletionChunk,
+    ChatCompletionResponse,
+    ChatUsage,
+)
+from runtime.infrastructure.frameworks.langgraph.llm.service import (
+    get_langgraph_llm_service,
 )
 
 # Clean DDD imports
-from ....domain.value_objects import FinishReason
+# FinishReason constants
+FINISH_REASON_STOP = "stop"
 
 class ValidationResult:
     """Validation result for framework operations."""
@@ -76,11 +82,12 @@ class ConversationAgent(BaseLangGraphAgent):
         },
     }
 
-    def __init__(self, agent_data: AgentCreateRequest, llm_service=None, toolset_service=None):
+    def __init__(self, agent_data: CreateAgentRequest, llm_service=None, toolset_service=None):
         """Initialize the conversation agent."""
         super().__init__(agent_data, llm_service, toolset_service)
 
-        # Extract configuration
+        # Extract configuration using structured access
+        config = agent_data.get_agent_configuration()
         self.max_history = self.template_config.get("max_history", 10)
         self.temperature = self.template_config.get("temperature", 0.7)
 
@@ -180,7 +187,7 @@ class ConversationAgent(BaseLangGraphAgent):
                             role=MessageRole.ASSISTANT,
                             content=content,
                         ),
-                        finish_reason=FinishReason.STOP,
+                        finish_reason=FINISH_REASON_STOP,
                     ),
                 ],
                 usage=ChatUsage(
@@ -223,8 +230,7 @@ class ConversationAgent(BaseLangGraphAgent):
 
         try:
             # Get streaming LLM client
-            from runtime.llm import get_streaming_llm_client
-            streaming_llm_client = get_streaming_llm_client(
+            streaming_llm_client = get_langgraph_llm_service(
                 llm_config_id=self.llm_config_id,
                 temperature=temp,
                 max_tokens=max_tokens,

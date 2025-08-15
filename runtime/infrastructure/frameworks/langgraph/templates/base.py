@@ -1,7 +1,5 @@
 """Base Agent Template - Enhanced Agent with Template Metadata."""
 
-import time
-import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -9,11 +7,13 @@ from typing import Any
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
-from ....api.models import (AgentCreateRequest, ChatChoice,
-                            ChatCompletionChunk, ChatCompletionResponse, 
-                            ChatUsage)
-from ....domain.value_objects import (ChatMessage, FinishReason, MessageRole)
-from ....templates.base import BaseAgentTemplate
+from runtime.infrastructure.web.models.requests import CreateAgentRequest
+from runtime.infrastructure.web.models.responses import (
+    ChatCompletionChunk,
+    ChatCompletionResponse,
+)
+from runtime.domain.value_objects.chat_message import ChatMessage
+from runtime.templates.base import BaseAgentTemplate
 
 
 class BaseLangGraphAgent(BaseAgentTemplate, ABC):
@@ -33,7 +33,7 @@ class BaseLangGraphAgent(BaseAgentTemplate, ABC):
     # Configuration Schema (class variable)
     config_schema: type[BaseModel] = BaseModel
 
-    def __init__(self, agent_data: AgentCreateRequest, llm_service=None, toolset_service=None) -> None:
+    def __init__(self, agent_data: CreateAgentRequest, llm_service=None, toolset_service=None) -> None:
         """Initialize agent instance with configuration."""
         super().__init__(agent_data, llm_service, toolset_service)
     

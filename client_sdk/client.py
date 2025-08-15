@@ -5,16 +5,16 @@ the agent runtime via HTTP.
 """
 
 import logging
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from collections.abc import AsyncGenerator
+from typing import Any, Optional
 import httpx
-from urllib.parse import urljoin
 
 from .models import (
-    AgentCreateRequest,
     AgentInfo,
-    ChatMessage,
-    ChatCompletionResponse,
     ChatCompletionChunk,
+    ChatCompletionResponse,
+    ChatMessage,
+    CreateAgentRequest,
     RuntimeStatus,
     TemplateInfo,
 )
@@ -85,7 +85,7 @@ class RuntimeClient:
 
     # Template Management Methods
 
-    async def list_templates(self, framework: Optional[str] = None) -> List[TemplateInfo]:
+    async def list_templates(self, framework: Optional[str] = None) -> list[TemplateInfo]:
         """List all available templates."""
         params = {}
         if framework:
@@ -111,7 +111,7 @@ class RuntimeClient:
 
     # Agent Management Methods
 
-    async def list_agents(self) -> List[AgentInfo]:
+    async def list_agents(self) -> list[AgentInfo]:
         """List all existing agents."""
         response = await self._request("GET", "agents/")
         return [AgentInfo(**a) for a in response.json()]
@@ -126,7 +126,7 @@ class RuntimeClient:
                 return None
             raise
 
-    async def create_agent(self, agent_request: AgentCreateRequest) -> AgentInfo:
+    async def create_agent(self, agent_request: CreateAgentRequest) -> AgentInfo:
         """Create a new agent."""
         response = await self._request("POST", "agents/", json=agent_request.dict())
         return AgentInfo(**response.json())
@@ -146,7 +146,7 @@ class RuntimeClient:
     async def chat_with_agent(
         self,
         agent_id: str,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         stream: bool = False
     ) -> ChatCompletionResponse:
         """Send messages to an agent and get a response."""
@@ -160,10 +160,10 @@ class RuntimeClient:
     async def stream_chat_with_agent(
         self,
         agent_id: str,
-        messages: List[ChatMessage]
+        messages: list[ChatMessage]
     ) -> AsyncGenerator[ChatCompletionChunk, None]:
         """Stream chat response from an agent."""
-        payload = {"messages": [msg.dict() for msg in messages]}
+        payload = {"messages": [msg.model_dump() for msg in messages]}
         async with self.http_client.stream("POST", f"agents/{agent_id}/chat/stream", json=payload) as response:
             response.raise_for_status()
             async for line in response.aiter_lines():
@@ -171,11 +171,11 @@ class RuntimeClient:
                     data = line[len("data: "):]
                     if data.strip() == "[DONE]":
                         break
-                    yield ChatCompletionChunk.parse_raw(data)
+                    yield ChatCompletionChunk.model_validate(data)
 
     # Health and Status Methods
 
-    async def get_health_status(self) -> Dict[str, Any]:
+    async def get_health_status(self) -> dict[str, Any]:
         """Get runtime health status."""
         try:
             response = await self._request("GET", "health/")

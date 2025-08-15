@@ -25,7 +25,7 @@ import click
 from tabulate import tabulate
 
 from client_sdk import RuntimeClient, RuntimeClientContext
-from runtime.infrastructure.web.models.requests import CreateAgentRequest as AgentCreateRequest
+from runtime.infrastructure.web.models.requests import CreateAgentRequest
 from runtime.domain.value_objects.chat_message import ChatMessage, MessageRole
 
 
@@ -263,15 +263,17 @@ async def create_agent(ctx, template_id: str, agent_id: Optional[str], name: Opt
                 version = "1.0.0"  # Default version
             
             # Create agent request
-            agent_request = AgentCreateRequest(
+            agent_request = CreateAgentRequest(
                 id=agent_id,
                 name=name,
                 description=description,
-                type=template_id,
+                type=template_id,  # Agent type from template
                 template_id=template_id,
-                template_version_id=version,
+                template_version_id=version or "v1.0.0",  # Required field
                 template_config={},
                 system_prompt=system_prompt,
+                agent_line_id=agent_id,  # Use agent_id as line_id
+                owner_id="cli-user",  # Default owner for CLI
                 llm_config_id=llm_config,
                 toolsets=[],
                 conversation_config={}

@@ -1,7 +1,7 @@
 """Agent entity - Pure domain model."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Dict, Any, Optional, List
 from enum import Enum
 
@@ -53,12 +53,13 @@ class Agent:
         template_id: str,
         configuration: Dict[str, Any],
         template_version: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        agent_id: Optional[str] = None
     ) -> "Agent":
         """Create a new agent."""
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         return cls(
-            id=AgentId.generate(),
+            id=AgentId.from_string(agent_id) if agent_id else AgentId.generate(),
             name=name,
             template_id=template_id,
             template_version=template_version,
@@ -75,7 +76,7 @@ class Agent:
             raise ValueError("Configuration must be a dictionary")
         
         self.configuration = new_configuration.copy()
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
     
     def update_status(self, new_status: AgentStatus) -> None:
         """Update agent status."""
@@ -83,7 +84,7 @@ class Agent:
             raise ValueError("Status must be an AgentStatus enum")
         
         self.status = new_status
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
     
     def activate(self) -> None:
         """Activate the agent."""
@@ -112,12 +113,12 @@ class Agent:
     def set_config_value(self, key: str, value: Any) -> None:
         """Set a configuration value."""
         self.configuration[key] = value
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
     
     def add_metadata(self, key: str, value: Any) -> None:
         """Add metadata to the agent."""
         self.metadata[key] = value
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
     
     def __eq__(self, other) -> bool:
         """Equality based on ID."""

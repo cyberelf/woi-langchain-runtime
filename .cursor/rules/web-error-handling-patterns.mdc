@@ -1,6 +1,4 @@
 ---
-description: 
-globs: backend/app/api/**/*.py,backend/app/services/**/*.py,backend/tests/**/*.py
 alwaysApply: false
 ---
 # Error Handling Patterns

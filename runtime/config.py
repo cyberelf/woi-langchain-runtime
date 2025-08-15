@@ -39,6 +39,25 @@ class Settings(BaseSettings):
     # Development
     debug: bool = Field(default=False, alias="DEBUG")
     reload: bool = Field(default=False, alias="RELOAD")
+    
+    # Framework configuration
+    default_framework: str = Field(default="langgraph", alias="DEFAULT_FRAMEWORK")
+    enabled_frameworks: str = Field(default="langgraph", alias="ENABLED_FRAMEWORKS")  # Comma-separated
+
+    # Task management configuration
+    task_manager_enabled: bool = Field(default=True, alias="TASK_MANAGER_ENABLED")
+    task_manager_workers: int = Field(default=10, alias="TASK_MANAGER_WORKERS")
+    task_cleanup_interval: int = Field(default=3600, alias="TASK_CLEANUP_INTERVAL")  # seconds
+    instance_timeout: int = Field(default=7200, alias="INSTANCE_TIMEOUT")  # seconds
+    
+    # Message queue configuration
+    message_queue_type: str = Field(default="memory", alias="MESSAGE_QUEUE_TYPE")  # memory, redis, rabbitmq
+    redis_url: str = Field(default="redis://localhost:6379", alias="REDIS_URL")
+    rabbitmq_url: str = Field(default="amqp://localhost:5672", alias="RABBITMQ_URL")
+    
+    # Message queue limits
+    max_queue_size: int = Field(default=10000, alias="MAX_QUEUE_SIZE")
+    message_retention_hours: int = Field(default=24, alias="MESSAGE_RETENTION_HOURS")
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -16,6 +16,7 @@ class CreateAgentCommand:
     configuration: Dict[str, Any]
     template_version: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    agent_id: Optional[str] = None
     
     def __post_init__(self):
         """Validate command data."""

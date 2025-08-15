@@ -1,43 +1,58 @@
-"""Framework integrations for the Agent Runtime.
+"""Framework executors for the Agent Runtime.
 
-This module provides pluggable framework integrations that implement
-the core runtime interfaces. Each framework is self-contained and
-provides its own templates, LLM services, and toolset integrations.
+This module provides pluggable framework executors that implement
+pure execution interfaces. Each framework is self-contained and
+provides stateless execution capabilities.
 
-Available frameworks:
+Available framework executors:
 - LangGraph: Complete reference implementation
 """
 
-from .base import FrameworkIntegration
+from .executor_base import FrameworkExecutor, AgentExecutorInterface
 
 # Lazy import to avoid circular dependencies
-def _get_langgraph_framework():
-    from .langgraph import LangGraphFramework
-    return LangGraphFramework
+def _get_langgraph_executor():
+    from .langgraph.executor import LangGraphFrameworkExecutor
+    return LangGraphFrameworkExecutor
 
-# Framework registry
-AVAILABLE_FRAMEWORKS = {
-    "langgraph": _get_langgraph_framework,
+# Framework executor registry
+AVAILABLE_EXECUTORS = {
+    "langgraph": _get_langgraph_executor,
 }
 
 
-def get_framework(name: str) -> FrameworkIntegration:
-    """Get a framework integration by name."""
-    if name not in AVAILABLE_FRAMEWORKS:
-        raise ValueError(f"Unknown framework: {name}. Available: {list(AVAILABLE_FRAMEWORKS.keys())}")
+def get_framework_executor(name: str) -> FrameworkExecutor:
+    """Get a framework executor by name."""
+    if name not in AVAILABLE_EXECUTORS:
+        raise ValueError(f"Unknown framework executor: {name}. Available: {list(AVAILABLE_EXECUTORS.keys())}")
     
-    framework_class = AVAILABLE_FRAMEWORKS[name]()  # Call the lazy loader
-    return framework_class()
+    executor_class = AVAILABLE_EXECUTORS[name]()  # Call the lazy loader
+    return executor_class()
 
 
-def list_frameworks() -> list[str]:
-    """List available framework names."""
-    return list(AVAILABLE_FRAMEWORKS.keys())
+def list_framework_executors() -> list[str]:
+    """List available framework executor names."""
+    return list(AVAILABLE_EXECUTORS.keys())
+
+
+# Backward compatibility - deprecated
+def get_framework(name: str):
+    """Deprecated: Use get_framework_executor instead."""
+    import warnings
+    warnings.warn(
+        "get_framework is deprecated. Use get_framework_executor instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    return get_framework_executor(name)
 
 
 __all__ = [
-    "FrameworkIntegration",
+    "FrameworkExecutor",
+    "AgentExecutorInterface", 
+    "get_framework_executor",
+    "list_framework_executors",
+    "AVAILABLE_EXECUTORS",
+    # Deprecated but kept for backward compatibility
     "get_framework",
-    "list_frameworks",
-    "AVAILABLE_FRAMEWORKS",
 ]

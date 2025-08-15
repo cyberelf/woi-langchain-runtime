@@ -40,7 +40,8 @@ class CreateAgentService:
                     template_id=command.template_id,
                     configuration=command.configuration,
                     template_version=command.template_version,
-                    metadata=command.metadata
+                    metadata=command.metadata,
+                    agent_id=command.agent_id
                 )
                 
                 # 2. Validate business rules

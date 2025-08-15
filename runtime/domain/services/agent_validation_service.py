@@ -137,15 +137,31 @@ class AgentValidationService:
     
     def _extract_template_type(self, template_id: str) -> str:
         """Extract template type from template ID."""
-        # Business rule: template type is embedded in template ID
-        if "conversation" in template_id.lower():
+        # Business rule: template type mapping
+        conversation_templates = [
+            "customer-service-bot",
+            "customer-support",
+            "chat-assistant"
+        ]
+        
+        task_templates = [
+            "task-execution-bot",
+            "workflow-agent"
+        ]
+        
+        custom_templates = [
+            "custom-code-agent"
+        ]
+        
+        if template_id.lower() in [t.lower() for t in conversation_templates] or "conversation" in template_id.lower():
             return "conversation"
-        elif "task" in template_id.lower():
+        elif template_id.lower() in [t.lower() for t in task_templates] or "task" in template_id.lower():
             return "task"
-        elif "custom" in template_id.lower():
+        elif template_id.lower() in [t.lower() for t in custom_templates] or "custom" in template_id.lower():
             return "custom"
         else:
-            return "unknown"
+            # Default to conversation type for unknown templates
+            return "conversation"
     
     def is_agent_valid(self, agent: Agent) -> bool:
         """Check if agent is valid according to business rules."""

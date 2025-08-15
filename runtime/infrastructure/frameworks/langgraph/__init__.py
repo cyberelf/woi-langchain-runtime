@@ -1,25 +1,25 @@
-"""LangGraph framework integration.
+"""LangGraph framework executor integration.
 
 This module provides a complete reference implementation of how to integrate
-a framework with the agent runtime. It demonstrates:
+a framework executor with the agent runtime. It demonstrates:
 
-- Template management and discovery
+- Pure stateless execution (no instance management)
+- Template discovery and validation
 - LLM service integration  
 - Toolset provider implementation
-- Agent factory pattern
+- Streaming and non-streaming execution
 - Framework-specific capabilities
 
-This serves as both a production-ready LangGraph integration and a reference
-for implementing other framework integrations.
+This serves as both a production-ready LangGraph executor and a reference
+for implementing other framework executors.
 """
 
-from .framework import LangGraphFramework
-from .factory import LangGraphAgentFactory
+from .executor import LangGraphFrameworkExecutor, LangGraphAgentExecutor
 from .templates import BaseLangGraphAgent, ConversationAgent, SimpleTestAgent
 
 __all__ = [
-    "LangGraphFramework",
-    "LangGraphAgentFactory", 
+    "LangGraphFrameworkExecutor",
+    "LangGraphAgentExecutor", 
     "BaseLangGraphAgent",
     "ConversationAgent",
     "SimpleTestAgent",

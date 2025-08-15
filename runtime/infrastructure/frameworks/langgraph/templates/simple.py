@@ -3,17 +3,20 @@
 import time
 import uuid
 from collections.abc import AsyncGenerator
-from enum import Enum
-from typing import Annotated, Any, Optional, TypedDict
+from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
 
-from ....api.models import (AgentCreateRequest, ChatChoice,
-                            ChatCompletionChunk, ChatCompletionResponse,
-                            ChatUsage)
-from ....domain.value_objects import (ChatMessage, FinishReason, MessageRole)
+from runtime.infrastructure.web.models.requests import CreateAgentRequest
+from runtime.infrastructure.web.models.responses import (
+    ChatChoice,
+    ChatCompletionChunk,
+    ChatCompletionResponse,
+    ChatUsage,
+)
+from runtime.domain.value_objects.chat_message import ChatMessage, MessageRole
 from .base import BaseLangGraphAgent
 
 
@@ -41,13 +44,15 @@ class SimpleTestAgent(BaseLangGraphAgent):
     # Configuration schema (class variables)
     config_schema: type[BaseModel] = SimpleTestAgentConfig
 
-    def __init__(self, agent_data: AgentCreateRequest, llm_service=None, toolset_service=None):
+    def __init__(self, agent_data: CreateAgentRequest, llm_service=None, toolset_service=None):
         """Initialize the simple test agent."""
         super().__init__(agent_data, llm_service, toolset_service)
 
-        # Extract configuration
+        # Extract configuration using structured access
+        config = agent_data.get_agent_configuration()
         self.response_prefix = self.template_config.get("response_prefix", "Test: ")
-        self.system_prompt = self.template_config.get("system_prompt", "You are a helpful assistant.")
+        # Use system_prompt from structured config if available, fallback to template config
+        self.system_prompt = config.system_prompt or self.template_config.get("system_prompt", "You are a helpful assistant.")
 
     def _convert_to_langgraph_messages(self, messages: list[ChatMessage]) -> list[BaseMessage]:
         """Convert our ChatMessage format to LangGraph's BaseMessage format."""
@@ -150,7 +155,7 @@ class SimpleTestAgent(BaseLangGraphAgent):
                     ChatChoice(
                         index=0,
                         message=response_message,
-                        finish_reason=FinishReason.STOP,
+                        finish_reason="stop",
                     ),
                 ],
                 usage=ChatUsage(

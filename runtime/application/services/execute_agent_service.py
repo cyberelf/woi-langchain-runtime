@@ -1,226 +1,237 @@
-"""Execute agent application service - Use case implementation."""
+"""Execute Agent Service V2 - Using Task Manager and Message Queue Architecture."""
 
 import logging
-from typing import List, Optional, AsyncGenerator, Any
+import uuid
+from typing import Dict, Any, Optional, AsyncGenerator
 
-from ...domain.entities.agent import Agent, AgentStatus
-from ...domain.entities.chat_session import ChatSession
-from ...domain.value_objects.session_id import SessionId
+from ...domain.value_objects.chat_message import ChatMessage
 from ...domain.unit_of_work.unit_of_work import UnitOfWorkInterface
-from ...domain.events.domain_events import SessionStarted, MessageAdded
+from ...core.agent_task_manager import (
+    AgentTaskManager, 
+    AgentTaskRequest, 
+    AgentTaskResult, 
+    TaskStatus
+)
+from ...core.message_queue import MessagePriority
 from ..commands.execute_agent_command import ExecuteAgentCommand
 
 logger = logging.getLogger(__name__)
 
 
-class AgentExecutionResult:
-    """Result of agent execution."""
+class ExecuteAgentServiceV2:
+    """Execute agent application service using async task management.
     
-    def __init__(self, session: ChatSession, response_content: str, metadata: dict = None):
-        self.session = session
-        self.response_content = response_content
-        self.metadata = metadata or {}
-
-
-class ExecuteAgentService:
-    """Application service for executing agents.
-    
-    Orchestrates the agent execution use case. Manages session lifecycle,
-    transaction boundaries, and coordinates with domain objects.
+    This service orchestrates agent execution by:
+    1. Submitting tasks to the task manager
+    2. Managing async execution via message queue
+    3. Providing results and streaming capabilities
+    4. Delegating all instance management to AgentTaskManager
     """
     
-    def __init__(self, uow: UnitOfWorkInterface, agent_runtime):
-        self.uow = uow
-        self.agent_runtime = agent_runtime  # Framework integration dependency
-        self._events: List[object] = []
+    def __init__(self, task_manager: AgentTaskManager):
+        self.task_manager = task_manager
     
-    async def execute(self, command: ExecuteAgentCommand) -> AgentExecutionResult:
-        """Execute the agent execution use case.
+    async def execute(self, command: ExecuteAgentCommand) -> AgentTaskResult:
+        """Execute an agent asynchronously via task manager.
         
-        This method represents the complete business transaction for
-        executing an agent and managing session state.
+        This method:
+        1. Creates a task request from the command
+        2. Submits to task manager for async execution
+        3. Waits for and returns the result
+        4. All instance management is handled by task manager
         """
         logger.info(f"Executing agent: {command.agent_id}")
         
-        async with self.uow:
-            try:
-                # 1. Get agent from repository
-                agent = await self.uow.agents.get_by_id(command.agent_id)
-                if not agent:
-                    raise ValueError(f"Agent {command.agent_id} not found")
-                
-                # 2. Validate agent is executable
-                if not agent.is_active():
-                    raise ValueError(f"Agent {command.agent_id} is not active")
-                
-                if not agent.is_configured_properly():
-                    raise ValueError(f"Agent {command.agent_id} is not properly configured")
-                
-                # 3. Get or create session
-                session = await self._get_or_create_session(command, agent)
-                
-                # 4. Add user messages to session
-                for message in command.messages:
-                    if message.is_user_message():
-                        session.add_message(message)
-                        
-                        # Raise domain event
-                        event = MessageAdded.create(
-                            session_id=session.id,
-                            message_role=message.role.value,
-                            message_content=message.content
-                        )
-                        self._events.append(event)
-                
-                # 5. Execute agent through runtime (infrastructure concern)
-                response_content = await self._execute_agent_runtime(
-                    agent, session, command
-                )
-                
-                # 6. Add assistant response to session
-                from ...domain.value_objects.chat_message import ChatMessage
-                assistant_message = ChatMessage.create_assistant_message(
-                    content=response_content,
-                    metadata=command.metadata or {}
-                )
-                session.add_message(assistant_message)
-                
-                # Raise domain event
-                event = MessageAdded.create(
-                    session_id=session.id,
-                    message_role=assistant_message.role.value,
-                    message_content=assistant_message.content
-                )
-                self._events.append(event)
-                
-                # 7. Save session
-                await self.uow.sessions.save(session)
-                
-                # 8. Commit transaction
-                await self.uow.commit()
-                
-                logger.info(f"Successfully executed agent: {command.agent_id}")
-                return AgentExecutionResult(
-                    session=session,
-                    response_content=response_content,
-                    metadata=command.metadata or {}
-                )
-                
-            except Exception as e:
-                logger.error(f"Failed to execute agent: {e}")
-                await self.uow.rollback()
-                raise
-    
-    async def execute_streaming(self, command: ExecuteAgentCommand) -> AsyncGenerator[str, None]:
-        """Execute agent with streaming response.
-        
-        This is a specialized version for streaming use cases.
-        """
-        logger.info(f"Executing agent with streaming: {command.agent_id}")
-        
-        async with self.uow:
-            try:
-                # 1. Get agent and session (same as regular execute)
-                agent = await self.uow.agents.get_by_id(command.agent_id)
-                if not agent:
-                    raise ValueError(f"Agent {command.agent_id} not found")
-                
-                session = await self._get_or_create_session(command, agent)
-                
-                # 2. Add user messages
-                for message in command.messages:
-                    if message.is_user_message():
-                        session.add_message(message)
-                
-                # 3. Stream agent execution
-                response_chunks = []
-                async for chunk in self._execute_agent_runtime_streaming(
-                    agent, session, command
-                ):
-                    response_chunks.append(chunk)
-                    yield chunk
-                
-                # 4. Save complete response to session
-                complete_response = "".join(response_chunks)
-                from ...domain.value_objects.chat_message import ChatMessage
-                assistant_message = ChatMessage.create_assistant_message(
-                    content=complete_response,
-                    metadata=command.metadata or {}
-                )
-                session.add_message(assistant_message)
-                
-                # 5. Save and commit
-                await self.uow.sessions.save(session)
-                await self.uow.commit()
-                
-            except Exception as e:
-                logger.error(f"Failed to execute streaming agent: {e}")
-                await self.uow.rollback()
-                raise
-    
-    async def _get_or_create_session(
-        self, command: ExecuteAgentCommand, agent: Agent
-    ) -> ChatSession:
-        """Get existing session or create new one."""
-        
-        # If session ID provided, try to get existing session
-        if command.session_id:
-            session = await self.uow.sessions.get_by_id(command.session_id)
-            if session:
-                session.touch()  # Update last activity
-                return session
-        
-        # If user ID provided, try to get existing session for this agent/user
-        if command.user_id:
-            session = await self.uow.sessions.get_by_agent_and_user(
-                agent.id, command.user_id
-            )
-            if session and not session.is_expired():
-                session.touch()
-                return session
-        
-        # Create new session
-        session = ChatSession.create(
-            agent_id=agent.id,
+        # Create task request
+        task_request = AgentTaskRequest.create_execute_task(
+            agent_id=command.agent_id,
+            messages=command.messages,
+            session_id=command.session_id,
             user_id=command.user_id,
-            metadata=command.metadata or {}
+            stream=command.stream,
+            temperature=command.temperature,
+            max_tokens=command.max_tokens,
+            metadata=command.metadata,
+            priority=MessagePriority.NORMAL,
+            correlation_id=str(uuid.uuid4())
         )
         
-        # Raise domain event
-        event = SessionStarted.create(
-            session_id=session.id,
-            agent_id=agent.id,
-            user_id=command.user_id or "anonymous"
+        # Submit task for async execution
+        task_id = await self.task_manager.submit_task(task_request)
+        logger.debug(f"Submitted task {task_id} for agent {command.agent_id}")
+        
+        # Wait for result (with timeout)
+        timeout_seconds = getattr(command, 'timeout_seconds', 300)  # 5 minutes default
+        result = await self.task_manager.get_task_result(task_id, timeout_seconds)
+        
+        if not result:
+            logger.error(f"Task {task_id} timed out after {timeout_seconds} seconds")
+            # Create timeout result
+            result = AgentTaskResult(
+                task_id=task_id,
+                agent_id=command.agent_id,
+                status=TaskStatus.TIMEOUT,
+                error=f"Task timed out after {timeout_seconds} seconds",
+                processing_time_ms=timeout_seconds * 1000
+            )
+        
+        logger.info(f"Agent execution completed: {command.agent_id}, status: {result.status.value}")
+        return result
+    
+    async def execute_streaming(self, command: ExecuteAgentCommand) -> AsyncGenerator[Dict[str, Any], None]:
+        """Execute an agent with streaming response via task manager."""
+        logger.info(f"Streaming execution for agent: {command.agent_id}")
+        
+        # Create streaming task request
+        task_request = AgentTaskRequest.create_execute_task(
+            agent_id=command.agent_id,
+            messages=command.messages,
+            session_id=command.session_id,
+            user_id=command.user_id,
+            stream=True,  # Force streaming
+            temperature=command.temperature,
+            max_tokens=command.max_tokens,
+            metadata=command.metadata,
+            priority=MessagePriority.HIGH,  # Higher priority for streaming
+            correlation_id=str(uuid.uuid4())
         )
-        self._events.append(event)
         
-        return session
-    
-    async def _execute_agent_runtime(
-        self, agent: Agent, session: ChatSession, command: ExecuteAgentCommand
-    ) -> str:
-        """Execute agent through runtime infrastructure.
+        # Submit streaming task
+        task_id = await self.task_manager.submit_task(task_request)
+        logger.debug(f"Submitted streaming task {task_id} for agent {command.agent_id}")
         
-        This delegates to infrastructure layer for actual execution.
-        """
-        # This would use the agent runtime to execute the agent
-        # For now, return a placeholder
-        return f"Response from agent {agent.name} for session {session.id}"
+        # Stream results
+        try:
+            async for chunk_data in self.task_manager.stream_task_results(task_id):
+                # Convert internal chunk format to OpenAI-compatible format
+                openai_chunk = {
+                    "id": chunk_data.get('id', str(uuid.uuid4())),
+                    "object": "chat.completion.chunk",
+                    "created": chunk_data.get('created', 0),
+                    "model": command.agent_id,
+                    "choices": chunk_data.get('choices', [{
+                        "index": 0,
+                        "delta": {"content": chunk_data.get('content', '')},
+                        "finish_reason": chunk_data.get('finish_reason')
+                    }])
+                }
+                
+                # Add usage info if available
+                if 'usage' in chunk_data:
+                    openai_chunk['usage'] = chunk_data['usage']
+                
+                yield openai_chunk
+                
+        except Exception as e:
+            logger.error(f"Streaming execution failed: {e}")
+            # Yield error chunk
+            yield {
+                "id": str(uuid.uuid4()),
+                "object": "chat.completion.chunk",
+                "created": 0,
+                "model": command.agent_id,
+                "choices": [{
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "error"
+                }],
+                "error": str(e)
+            }
     
-    async def _execute_agent_runtime_streaming(
-        self, agent: Agent, session: ChatSession, command: ExecuteAgentCommand
-    ) -> AsyncGenerator[str, None]:
-        """Execute agent with streaming through runtime infrastructure."""
-        # This would use the agent runtime for streaming execution
-        # For now, yield placeholder chunks
-        chunks = ["Response ", "from ", "agent ", agent.name]
-        for chunk in chunks:
+    async def get_agent_instances(self) -> list[Dict[str, Any]]:
+        """Get list of managed agent instances."""
+        return await self.task_manager.list_agent_instances()
+    
+    async def destroy_session_agent(self, agent_id: str, session_id: str) -> bool:
+        """Destroy a session agent."""
+        return await self.task_manager.destroy_agent_instance(agent_id, session_id)
+    
+    async def cleanup_inactive_sessions(self) -> None:
+        """Clean up inactive session agents."""
+        # This is now handled automatically by task manager's cleanup worker
+        logger.info("Session cleanup is handled automatically by task manager")
+    
+    async def get_task_manager_health(self) -> Dict[str, Any]:
+        """Get task manager health status."""
+        return {
+            "task_manager_running": self.task_manager._running,
+            "worker_count": len(self.task_manager._task_workers),
+            "active_instances": len(self.task_manager._agent_instances),
+            "running_tasks": len(self.task_manager._running_tasks),
+            "message_queue_type": type(self.task_manager.message_queue).__name__
+        }
+
+
+# Adapter class for backward compatibility
+class AgentExecutionResult:
+    """Backward compatibility adapter for AgentTaskResult."""
+    
+    def __init__(self, task_result: AgentTaskResult):
+        self._task_result = task_result
+        
+        # Map task result to old format
+        self.response_id = task_result.task_id
+        self.agent_id = task_result.agent_id
+        self.message = task_result.message or ""
+        self.finish_reason = task_result.finish_reason or "stop"
+        self.prompt_tokens = task_result.prompt_tokens
+        self.completion_tokens = task_result.completion_tokens
+        self.total_tokens = task_result.total_tokens
+        self.processing_time_ms = task_result.processing_time_ms
+        self.metadata = task_result.metadata
+        self.created_at = int(task_result.created_at.timestamp())
+        
+        # Handle status mapping
+        if task_result.status == TaskStatus.COMPLETED:
+            self.success = True
+            self.error = None
+        else:
+            self.success = False
+            self.error = task_result.error or f"Task failed with status: {task_result.status.value}"
+
+
+class ExecuteAgentServiceAdapter:
+    """Adapter to maintain backward compatibility with existing API.
+    
+    This adapter wraps ExecuteAgentServiceV2 to provide the same interface
+    as the original ExecuteAgentService while using the new task management system.
+    """
+    
+    def __init__(self, task_manager: AgentTaskManager):
+        self._service = ExecuteAgentServiceV2(task_manager)
+    
+    async def execute(self, command: ExecuteAgentCommand) -> AgentExecutionResult:
+        """Execute agent and return result in old format."""
+        task_result = await self._service.execute(command)
+        return AgentExecutionResult(task_result)
+    
+    async def _execute_streaming_real(
+        self, 
+        agent_instance, 
+        messages: list[ChatMessage], 
+        command: ExecuteAgentCommand, 
+        start_time: float
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Streaming execution using new task manager (backward compatibility)."""
+        async for chunk in self._service.execute_streaming(command):
             yield chunk
     
-    def get_events(self) -> List[object]:
-        """Get domain events raised during execution."""
-        return self._events.copy()
+    async def _execute_streaming_mock(
+        self, 
+        agent, 
+        command: ExecuteAgentCommand, 
+        start_time: float
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Mock streaming (replaced by real streaming via task manager)."""
+        async for chunk in self._service.execute_streaming(command):
+            yield chunk
     
-    def clear_events(self) -> None:
-        """Clear domain events."""
-        self._events.clear()
+    # Delegate other methods
+    async def get_agent_instances(self) -> list[Dict[str, Any]]:
+        return await self._service.get_agent_instances()
+    
+    async def destroy_session_agent(self, agent_id: str, session_id: str) -> bool:
+        return await self._service.destroy_session_agent(agent_id, session_id)
+    
+    async def cleanup_inactive_sessions(self) -> None:
+        await self._service.cleanup_inactive_sessions()
