@@ -7,10 +7,10 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from langgraph.graph.state import CompiledStateGraph
 
 # Updated imports for DDD structure
 from runtime.domain.value_objects.chat_message import ChatMessage, MessageRole
-from runtime.infrastructure.web.models.requests import CreateAgentRequest
 from runtime.infrastructure.web.models.responses import (
     ChatChoice,
     ChatCompletionChunk,
@@ -20,6 +20,7 @@ from runtime.infrastructure.web.models.responses import (
 from runtime.infrastructure.frameworks.langgraph.llm.service import (
     get_langgraph_llm_service,
 )
+from runtime.templates.base import BaseAgentTemplate
 
 # Clean DDD imports
 # FinishReason constants
@@ -52,7 +53,7 @@ class ConversationAgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ConversationAgent(BaseLangGraphAgent):
+class ConversationAgent(BaseAgentTemplate, BaseLangGraphAgent):
     """Simple conversation agent template using direct LLM calls."""
 
     # Template metadata (class variables)
@@ -82,12 +83,17 @@ class ConversationAgent(BaseLangGraphAgent):
         },
     }
 
-    def __init__(self, agent_data: CreateAgentRequest, llm_service=None, toolset_service=None):
+    def __init__(
+        self, 
+        configuration: dict[str, Any], 
+        metadata: Optional[dict[str, Any]] = None, 
+        llm_service=None, 
+        toolset_service=None
+    ):
         """Initialize the conversation agent."""
-        super().__init__(agent_data, llm_service, toolset_service)
-
-        # Extract configuration using structured access
-        config = agent_data.get_agent_configuration()
+        super().__init__(configuration, metadata, llm_service, toolset_service)
+        self._graph: CompiledStateGraph | None = None
+        # Extract configuration from the configuration dict
         self.max_history = self.template_config.get("max_history", 10)
         self.temperature = self.template_config.get("temperature", 0.7)
 

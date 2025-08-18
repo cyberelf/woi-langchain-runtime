@@ -1,6 +1,6 @@
 """Chat message value object - Pure domain model."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from enum import Enum
 from typing import Dict, Any, Optional
@@ -25,8 +25,8 @@ class ChatMessage:
     
     role: MessageRole
     content: str
-    timestamp: datetime
-    metadata: Dict[str, Any]
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+    metadata: dict[str, Any] = field(default_factory=dict)
     
     def __post_init__(self):
         if not isinstance(self.role, MessageRole):
@@ -88,3 +88,13 @@ class ChatMessage:
             "timestamp": self.timestamp.isoformat(),
             "metadata": self.metadata
         }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ChatMessage":
+        """Create ChatMessage from dictionary representation."""
+        return cls(
+            role=MessageRole(data["role"]),
+            content=data["content"],
+            timestamp=datetime.fromisoformat(data["timestamp"]),
+            metadata=data.get("metadata", {})
+        )

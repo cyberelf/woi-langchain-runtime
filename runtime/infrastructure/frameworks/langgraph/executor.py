@@ -6,6 +6,8 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any, Optional
 
+from runtime.templates.base import BaseAgentTemplate
+
 from ..executor_base import (
     AgentExecutorInterface,
     ExecutionResult,
@@ -14,7 +16,6 @@ from ..executor_base import (
 )
 from ....domain.value_objects.chat_message import ChatMessage
 from .templates import get_langgraph_template_classes
-from runtime.infrastructure.web.models.requests import CreateAgentRequest
 from runtime.infrastructure.frameworks.langgraph.llm.service import (
     LangGraphLLMService,
 )
@@ -28,10 +29,15 @@ logger = logging.getLogger(__name__)
 class LangGraphAgentExecutor(AgentExecutorInterface):
     """Pure LangGraph agent executor - stateless execution only."""
     
-    def __init__(self, template_classes: dict):
+    def __init__(self, template_classes: dict, llm_service=None, toolset_service=None):
         self.template_classes = template_classes
-        self._llm_service = None
-        self._toolset_service = None
+        self._llm_service = llm_service
+        self._toolset_service = toolset_service
+    
+    async def cleanup(self):
+        """Clean up executor resources."""
+        # Base cleanup - subclasses can override for specific cleanup logic
+        pass
     
     async def execute(
         self,
@@ -295,25 +301,25 @@ class LangGraphAgentExecutor(AgentExecutorInterface):
         template_version: str,
         configuration: dict,
         metadata: Optional[dict]
-    ) -> Any:
+    ) -> BaseAgentTemplate:
         """Create a temporary execution instance (not stored/managed)."""
         
-        # Create a temporary agent request for execution
-        temp_request = CreateAgentRequest(
-            id=f"exec-{uuid.uuid4()}",  # Temporary ID
-            name=f"Execution Instance ({template_id})",
-            type=template_id,  # Required field
-            template_id=template_id,
-            template_version_id=template_version or "v1.0.0",  # Required field
-            agent_line_id=f"exec-{uuid.uuid4()}",  # Required field
-            owner_id="system",  # Required field for temporary execution
-            template_version=template_version,
-            template_config=configuration,
-            # Note: metadata is not a field in CreateAgentRequest, we'll handle it differently
-        )
+        # Prepare static metadata for the template
+        static_metadata = {
+            "template_id": template_id,
+            "template_version": template_version,
+            # Extract agent metadata from the execution metadata if available
+            "agent_id": metadata.get("agent_id", f"exec-{uuid.uuid4()}"),
+            "agent_name": metadata.get("agent_name", f"Execution Instance ({template_id})"),
+        }
         
-        # Create temporary instance
-        return template_class(temp_request)
+        # Create temporary instance with services injected
+        return template_class(
+            configuration=configuration, 
+            metadata=static_metadata,
+            llm_service=self._llm_service,
+            toolset_service=self._toolset_service
+        )
 
 
 class LangGraphFrameworkExecutor(FrameworkExecutor):
@@ -351,7 +357,11 @@ class LangGraphFrameworkExecutor(FrameworkExecutor):
     def create_agent_executor(self) -> AgentExecutorInterface:
         """Create framework-specific agent executor."""
         if self._agent_executor is None:
-            self._agent_executor = LangGraphAgentExecutor(self.template_classes)
+            self._agent_executor = LangGraphAgentExecutor(
+                self.template_classes,
+                llm_service=self.get_llm_service(),
+                toolset_service=self.get_toolset_service()
+            )
         return self._agent_executor
     
     def get_templates(self) -> list[dict]:

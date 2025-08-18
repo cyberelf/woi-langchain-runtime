@@ -106,12 +106,6 @@ async def get_execute_agent_service() -> ExecuteAgentServiceV2:
     return _execute_service
 
 
-async def get_execute_agent_service() -> ExecuteAgentServiceAdapter:
-    """Get backward-compatible execute agent service."""
-    task_manager = await get_task_manager()
-    return ExecuteAgentServiceAdapter(task_manager)
-
-
 def get_create_agent_service() -> CreateAgentService:
     """Get create agent service dependency."""
     uow = get_unit_of_work()

@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
 from typing import Any, Optional
 
-from runtime.infrastructure.web.models.requests import CreateAgentRequest
 from runtime.infrastructure.web.models.responses import (
     ChatCompletionChunk,
     ChatCompletionResponse,
@@ -28,30 +27,37 @@ class BaseAgentTemplate(ABC):
 
     def __init__(
         self, 
-        agent_data: CreateAgentRequest, 
+        configuration: dict[str, Any], 
+        metadata: Optional[dict[str, Any]] = None,
         llm_service=None, 
         toolset_service=None
     ) -> None:
-        """Initialize agent instance with configuration."""
-        # Parse request into structured models for better separation of concerns
-        identity = agent_data.get_identity()
-        template = agent_data.get_template()
-        config = agent_data.get_agent_configuration()
+        """Initialize agent instance with configuration and metadata.
         
-        # Initialize identity and template fields
-        self.id = identity.id
-        self.name = identity.name
-        self.template_id = template.template_id
-        self.template_version = template.get_template_version() or self.template_version
-        self.template_config = config.config or {}
+        Args:
+            configuration: Agent's static configuration (template_config)
+            metadata: Static metadata about the agent (id, name, template_id, etc.)
+            llm_service: Optional LLM service instance
+            toolset_service: Optional toolset service instance
+        """
+        metadata = metadata or {}
+        
+        # Initialize identity and template fields from metadata
+        self.id = metadata.get("agent_id", "unknown")
+        self.name = metadata.get("agent_name", "Unknown Agent")
+        self.template_id = metadata.get("template_id", self.template_id)
+        self.template_version = metadata.get("template_version", self.template_version)
+        
+        # Store the configuration
+        self.template_config = configuration
         
         # Services
         self.llm_service = llm_service
         self.toolset_service = toolset_service
         
-        # Extract common config using structured configuration model
-        self.system_prompt = config.system_prompt or self.template_config.get("system_prompt", "")
-        self.llm_config_id = config.llm_config_id or self.template_config.get("llm_config_id")
+        # Extract common config from configuration dict
+        self.system_prompt = configuration.get("system_prompt", "")
+        self.llm_config_id = configuration.get("llm_config_id")
 
     @abstractmethod
     async def execute(
@@ -82,6 +88,19 @@ class BaseAgentTemplate(ABC):
         else:
             # Fallback - would be implemented based on your LLM integration
             raise NotImplementedError("LLM service not configured")
+
+    async def get_toolset_client(self):
+        """Get toolset client for this agent."""
+        if self.toolset_service:
+            # Get toolset configurations for this agent
+            toolset_configs = self.template_config.get("toolset_configs", [])
+            if not toolset_configs:
+                # Return None if no toolsets configured - agents can handle this gracefully
+                return None
+            return await self.toolset_service.create_client(toolset_configs)
+        else:
+            # Return None if toolset service not configured - allows agents to work without tools
+            return None
 
     def cleanup(self):
         """Clean up agent resources if needed."""

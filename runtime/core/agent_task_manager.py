@@ -10,12 +10,14 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, AsyncGenerator, Callable
 from concurrent.futures import ThreadPoolExecutor
 
+from runtime.infrastructure.frameworks.executor_base import AgentExecutorInterface
+
 from .message_queue import MessageQueueInterface, QueueMessage, MessagePriority, MessageStatus
 from ..domain.entities.agent import Agent
 from ..domain.value_objects.agent_id import AgentId
 from ..domain.value_objects.chat_message import ChatMessage, MessageRole
 from ..domain.unit_of_work.unit_of_work import UnitOfWorkInterface
-from runtime.infrastructure.web.models.requests import CreateAgentRequest
+
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +166,33 @@ class AgentTaskResult:
             'metadata': self.metadata,
             'created_at': self.created_at.isoformat()
         }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "AgentTaskResult":
+        """Create AgentTaskResult from dictionary."""
+        # Convert status string back to enum
+        status = TaskStatus(data['status']) if isinstance(data['status'], str) else data['status']
+        
+        # Convert datetime string back to datetime
+        created_at = datetime.fromisoformat(data['created_at']) if isinstance(data['created_at'], str) else data['created_at']
+        
+        # Remove computed fields
+        clean_data = data.copy()
+        clean_data.pop('total_tokens', None)
+        
+        return cls(
+            task_id=clean_data['task_id'],
+            agent_id=clean_data['agent_id'],
+            status=status,
+            message=clean_data.get('message'),
+            finish_reason=clean_data.get('finish_reason'),
+            prompt_tokens=clean_data.get('prompt_tokens', 0),
+            completion_tokens=clean_data.get('completion_tokens', 0),
+            processing_time_ms=clean_data.get('processing_time_ms', 0),
+            error=clean_data.get('error'),
+            metadata=clean_data.get('metadata', {}),
+            created_at=created_at
+        )
 
 
 @dataclass
@@ -172,7 +201,7 @@ class AgentInstance:
     agent_id: str
     session_id: Optional[str]
     agent: Agent
-    framework_agent: Any  # The actual framework agent instance
+    framework_agent: AgentExecutorInterface
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_activity: datetime = field(default_factory=lambda: datetime.now(UTC))
     message_count: int = 0
@@ -333,7 +362,7 @@ class AgentTaskManager:
             
             if message and message.payload.get('task_id') == task_id:
                 await self.message_queue.acknowledge_message(message)
-                result = AgentTaskResult(**message.payload)
+                result = AgentTaskResult.from_dict(message.payload)
                 self._task_results[task_id] = result
                 return result
             
@@ -393,22 +422,8 @@ class AgentTaskManager:
                 if not agent:
                     raise ValueError(f"Agent {agent_id} not found")
             
-            # Create framework agent instance
-            agent_request = CreateAgentRequest(
-                id=instance_key,
-                name=f"{agent.name}" + (f" (Session: {session_id[:8]})" if session_id else ""),
-                type=getattr(agent, 'type', agent.template_id),  # Use agent type or fallback to template_id
-                template_id=agent.template_id,
-                template_version=agent.template_version,
-                template_version_id=getattr(agent, 'template_version_id', agent.template_version or "v1.0.0"),
-                template_config=agent.configuration,
-                agent_line_id=agent_id,  # Use the base agent ID as line ID
-                owner_id=getattr(agent, 'owner_id', 'system'),  # Use agent owner or default to system
-                status=getattr(agent, 'status', 'published'),  # Use agent status or default to published
-                # Note: metadata is no longer a field in CreateAgentRequest
-            )
-            
-            framework_agent = self._framework.create_agent_executor(agent_request)
+            # Create framework agent instance (stateless executor)
+            framework_agent = self._framework.create_agent_executor()
             
             # Create managed instance
             instance = AgentInstance(
@@ -532,41 +547,43 @@ class AgentTaskManager:
         try:
             # Execute using framework agent
             response = await instance.framework_agent.execute(
+                template_id=instance.agent.template_id,
+                template_version=instance.agent.template_version or "v1.0.0",
+                configuration=instance.agent.configuration,
                 messages=task_request.messages,
                 temperature=task_request.temperature,
                 max_tokens=task_request.max_tokens,
                 metadata={
+                    # Agent static context
+                    "agent_id": instance.agent_id,
+                    "agent_name": instance.agent.name,
+                    "template_id": instance.agent.template_id,
+                    "template_version": instance.agent.template_version or "v1.0.0",
+                    # Dynamic execution context
                     "session_id": task_request.session_id,
                     "user_id": task_request.user_id,
+                    "task_id": task_request.task_id,
                     **(task_request.metadata or {})
                 }
             )
             
             # Convert response
             processing_time = int((time.time() - start_time) * 1000)
-            
-            # Extract response data (framework-specific)
-            message = "No response"
-            finish_reason = "stop"
-            prompt_tokens = 0
-            completion_tokens = 0
-            
-            if hasattr(response, 'choices') and response.choices:
-                message = response.choices[0].message.content
-                finish_reason = getattr(response.choices[0], 'finish_reason', 'stop')
-            
-            if hasattr(response, 'usage'):
-                prompt_tokens = response.usage.prompt_tokens
-                completion_tokens = response.usage.completion_tokens
+
+            if response.success:
+                status = TaskStatus.COMPLETED
+            else:
+                status = TaskStatus.FAILED
             
             return AgentTaskResult(
                 task_id=task_request.task_id,
                 agent_id=task_request.agent_id,
-                status=TaskStatus.COMPLETED,
-                message=message,
-                finish_reason=finish_reason,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
+                status=status,
+                message=response.message,
+                error=response.error,
+                finish_reason=response.finish_reason,
+                prompt_tokens=response.prompt_tokens,
+                completion_tokens=response.completion_tokens,
                 processing_time_ms=processing_time,
                 metadata={
                     "session_id": task_request.session_id,
@@ -603,12 +620,22 @@ class AgentTaskManager:
             # Stream execution
             chunk_count = 0
             async for chunk in instance.framework_agent.stream_execute(
+                template_id=instance.agent.template_id,
+                template_version=instance.agent.template_version or "v1.0.0",
+                configuration=instance.agent.configuration,
                 messages=task_request.messages,
                 temperature=task_request.temperature,
                 max_tokens=task_request.max_tokens,
                 metadata={
+                    # Agent static context
+                    "agent_id": instance.agent_id,
+                    "agent_name": instance.agent.name,
+                    "template_id": instance.agent.template_id,
+                    "template_version": instance.agent.template_version or "v1.0.0",
+                    # Dynamic execution context
                     "session_id": task_request.session_id,
                     "user_id": task_request.user_id,
+                    "task_id": task_request.task_id,
                     **(task_request.metadata or {})
                 }
             ):

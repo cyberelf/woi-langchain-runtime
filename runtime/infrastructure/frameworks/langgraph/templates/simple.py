@@ -3,20 +3,22 @@
 import time
 import uuid
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Any, Optional
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.prebuilt import create_react_agent
+from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field
 
-from runtime.infrastructure.web.models.requests import CreateAgentRequest
 from runtime.infrastructure.web.models.responses import (
-    ChatChoice,
+    ChatCompletionChoice,
     ChatCompletionChunk,
     ChatCompletionResponse,
-    ChatUsage,
+    ChatCompletionUsage,
+    ChatMessageResponse,
 )
 from runtime.domain.value_objects.chat_message import ChatMessage, MessageRole
+from runtime.templates.base import BaseAgentTemplate
 from .base import BaseLangGraphAgent
 
 
@@ -31,28 +33,36 @@ class SimpleTestAgentConfig(BaseModel):
     )
 
 
-class SimpleTestAgent(BaseLangGraphAgent):
+class SimpleTestAgent(BaseAgentTemplate, BaseLangGraphAgent):
     """Simple test agent template for validation - no external dependencies."""
 
     # Template metadata (class variables)
     template_name: str = "Simple Test Agent"
-    template_id: str = "simple-test"
+    template_id: str = "langgraph-simple-test"
     template_version: str = "1.0.0"
     template_description: str = "Simple test agent for system validation"
-    framework: str = "test"
+    framework: str = "langgraph"
 
     # Configuration schema (class variables)
     config_schema: type[BaseModel] = SimpleTestAgentConfig
 
-    def __init__(self, agent_data: CreateAgentRequest, llm_service=None, toolset_service=None):
+    def __init__(
+        self, 
+        configuration: dict[str, Any], 
+        metadata: Optional[dict[str, Any]] = None, 
+        llm_service=None, 
+        toolset_service=None
+    ):
         """Initialize the simple test agent."""
-        super().__init__(agent_data, llm_service, toolset_service)
-
-        # Extract configuration using structured access
-        config = agent_data.get_agent_configuration()
+        super().__init__(configuration, metadata, llm_service, toolset_service)
+        self._graph: CompiledStateGraph | None = None
+        # Extract configuration from the configuration dict
         self.response_prefix = self.template_config.get("response_prefix", "Test: ")
-        # Use system_prompt from structured config if available, fallback to template config
-        self.system_prompt = config.system_prompt or self.template_config.get("system_prompt", "You are a helpful assistant.")
+        # Use system_prompt from configuration, fallback to template default
+        self.system_prompt = (
+            self.system_prompt or 
+            self.template_config.get("system_prompt", "You are a helpful assistant.")
+        )
 
     def _convert_to_langgraph_messages(self, messages: list[ChatMessage]) -> list[BaseMessage]:
         """Convert our ChatMessage format to LangGraph's BaseMessage format."""
@@ -141,9 +151,22 @@ class SimpleTestAgent(BaseLangGraphAgent):
             # Convert back to our format
             response_message = self._convert_from_langgraph_message(last_message)
             
-            # Add response prefix if configured
+            # Add response prefix if configured (create new message since ChatMessage is frozen)
             if self.response_prefix and not response_message.content.startswith(self.response_prefix):
-                response_message.content = self.response_prefix + response_message.content
+                response_message = ChatMessage(
+                    role=response_message.role,
+                    content=self.response_prefix + response_message.content,
+                    timestamp=response_message.timestamp,
+                    metadata=response_message.metadata
+                )
+            
+            # Convert domain ChatMessage to response model ChatMessageResponse
+            response_model = ChatMessageResponse(
+                role=response_message.role,
+                content=response_message.content,
+                timestamp=response_message.timestamp,
+                metadata=response_message.metadata
+            )
             
             # Create response
             return ChatCompletionResponse(
@@ -152,13 +175,13 @@ class SimpleTestAgent(BaseLangGraphAgent):
                 created=int(start_time),
                 model=self.id,
                 choices=[
-                    ChatChoice(
+                    ChatCompletionChoice(
                         index=0,
-                        message=response_message,
+                        message=response_model,
                         finish_reason="stop",
                     ),
                 ],
-                usage=ChatUsage(
+                usage=ChatCompletionUsage(
                     prompt_tokens=result.get("usage", {}).get("prompt_tokens", 0),
                     completion_tokens=result.get("usage", {}).get("completion_tokens", 0),
                     total_tokens=result.get("usage", {}).get("total_tokens", 0),

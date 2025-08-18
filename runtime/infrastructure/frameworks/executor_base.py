@@ -8,6 +8,76 @@ from ...domain.value_objects.chat_message import ChatMessage
 from ...core import BaseService
 
 
+class ExecutionResult:
+    """Result of agent execution."""
+    
+    def __init__(
+        self,
+        success: bool,
+        message: Optional[str] = None,
+        finish_reason: str = "stop",
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        processing_time_ms: int = 0,
+        error: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        context_updated: bool = False
+    ):
+        self.success = success
+        self.message = message
+        self.finish_reason = finish_reason
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.total_tokens = prompt_tokens + completion_tokens
+        self.processing_time_ms = processing_time_ms
+        self.error = error
+        self.metadata = metadata or {}
+        self.context_updated = context_updated
+        self.created_at = datetime.now(UTC)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            'success': self.success,
+            'message': self.message,
+            'finish_reason': self.finish_reason,
+            'prompt_tokens': self.prompt_tokens,
+            'completion_tokens': self.completion_tokens,
+            'total_tokens': self.total_tokens,
+            'processing_time_ms': self.processing_time_ms,
+            'error': self.error,
+            'metadata': self.metadata,
+            'context_updated': self.context_updated,
+            'created_at': self.created_at.isoformat()
+        }
+
+
+class StreamingChunk:
+    """Streaming execution chunk."""
+    
+    def __init__(
+        self,
+        content: str,
+        chunk_index: int = 0,
+        finish_reason: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ):
+        self.content = content
+        self.chunk_index = chunk_index
+        self.finish_reason = finish_reason
+        self.metadata = metadata or {}
+        self.created_at = datetime.now(UTC)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            'content': self.content,
+            'chunk_index': self.chunk_index,
+            'finish_reason': self.finish_reason,
+            'metadata': self.metadata,
+            'created_at': self.created_at.isoformat()
+        }
+
 class AgentExecutorInterface(ABC):
     """Pure agent executor interface - stateless execution only."""
     
@@ -21,7 +91,7 @@ class AgentExecutorInterface(ABC):
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None
-    ) -> Any:
+    ) -> ExecutionResult:
         """Execute agent with given parameters - stateless execution."""
         pass
     
@@ -35,7 +105,7 @@ class AgentExecutorInterface(ABC):
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None
-    ) -> AsyncGenerator[Any, None]:
+    ) -> AsyncGenerator[StreamingChunk, None]:
         """Stream execute agent with given parameters - stateless execution."""
         pass
     
@@ -205,74 +275,3 @@ class ExecutionContext:
         context.last_updated = datetime.fromisoformat(data['last_updated'])
         context.execution_count = data.get('execution_count', 0)
         return context
-
-
-class ExecutionResult:
-    """Result of agent execution."""
-    
-    def __init__(
-        self,
-        success: bool,
-        message: Optional[str] = None,
-        finish_reason: str = "stop",
-        prompt_tokens: int = 0,
-        completion_tokens: int = 0,
-        processing_time_ms: int = 0,
-        error: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        context_updated: bool = False
-    ):
-        self.success = success
-        self.message = message
-        self.finish_reason = finish_reason
-        self.prompt_tokens = prompt_tokens
-        self.completion_tokens = completion_tokens
-        self.total_tokens = prompt_tokens + completion_tokens
-        self.processing_time_ms = processing_time_ms
-        self.error = error
-        self.metadata = metadata or {}
-        self.context_updated = context_updated
-        self.created_at = datetime.now(UTC)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            'success': self.success,
-            'message': self.message,
-            'finish_reason': self.finish_reason,
-            'prompt_tokens': self.prompt_tokens,
-            'completion_tokens': self.completion_tokens,
-            'total_tokens': self.total_tokens,
-            'processing_time_ms': self.processing_time_ms,
-            'error': self.error,
-            'metadata': self.metadata,
-            'context_updated': self.context_updated,
-            'created_at': self.created_at.isoformat()
-        }
-
-
-class StreamingChunk:
-    """Streaming execution chunk."""
-    
-    def __init__(
-        self,
-        content: str,
-        chunk_index: int = 0,
-        finish_reason: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
-    ):
-        self.content = content
-        self.chunk_index = chunk_index
-        self.finish_reason = finish_reason
-        self.metadata = metadata or {}
-        self.created_at = datetime.now(UTC)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            'content': self.content,
-            'chunk_index': self.chunk_index,
-            'finish_reason': self.finish_reason,
-            'metadata': self.metadata,
-            'created_at': self.created_at.isoformat()
-        }
