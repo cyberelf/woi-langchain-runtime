@@ -15,11 +15,15 @@ for implementing other framework executors.
 """
 
 from .executor import LangGraphFrameworkExecutor, LangGraphAgentExecutor
+from .config import LangGraphFrameworkConfig, LLMConfig, ToolsetsConfig
 from .templates import BaseLangGraphAgent, ConversationAgent, SimpleTestAgent
 
 __all__ = [
     "LangGraphFrameworkExecutor",
     "LangGraphAgentExecutor", 
+    "LangGraphFrameworkConfig",
+    "LLMConfig",
+    "ToolsetsConfig",
     "BaseLangGraphAgent",
     "ConversationAgent",
     "SimpleTestAgent",

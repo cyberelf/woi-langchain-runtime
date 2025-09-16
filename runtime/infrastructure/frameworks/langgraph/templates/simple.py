@@ -3,6 +3,7 @@
 import time
 import uuid
 from collections.abc import AsyncGenerator
+from datetime import datetime, UTC
 from typing import Any, Optional
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -10,14 +11,18 @@ from langgraph.prebuilt import create_react_agent
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field
 
+from runtime.domain.services.llm.llm_service import LLMService
+from runtime.domain.services.toolset.toolset_service import ToolsetService
 from runtime.infrastructure.web.models.responses import (
     ChatCompletionChoice,
     ChatCompletionChunk,
+    ChatCompletionChunkChoice,
     ChatCompletionResponse,
     ChatCompletionUsage,
     ChatMessageResponse,
 )
 from runtime.domain.value_objects.chat_message import ChatMessage, MessageRole
+from runtime.domain.value_objects.agent_configuration import AgentConfiguration
 from runtime.templates.base import BaseAgentTemplate
 from .base import BaseLangGraphAgent
 
@@ -48,21 +53,22 @@ class SimpleTestAgent(BaseAgentTemplate, BaseLangGraphAgent):
 
     def __init__(
         self, 
-        configuration: dict[str, Any], 
+        configuration: AgentConfiguration, 
+        llm_service: LLMService, 
+        toolset_service: Optional[ToolsetService] = None,
         metadata: Optional[dict[str, Any]] = None, 
-        llm_service=None, 
-        toolset_service=None
     ):
         """Initialize the simple test agent."""
-        super().__init__(configuration, metadata, llm_service, toolset_service)
+        super().__init__(configuration, llm_service, toolset_service, metadata)
         self._graph: CompiledStateGraph | None = None
-        # Extract configuration from the configuration dict
-        self.response_prefix = self.template_config.get("response_prefix", "Test: ")
-        # Use system_prompt from configuration, fallback to template default
-        self.system_prompt = (
-            self.system_prompt or 
-            self.template_config.get("system_prompt", "You are a helpful assistant.")
-        )
+        
+        # Extract template-specific configuration using helper methods
+        self.response_prefix = self.get_config_value("response_prefix", "Test: ")
+        
+        # Use system_prompt from base class initialization (already extracted from config)
+        # Fallback to template default if not provided
+        if not self.system_prompt:
+            self.system_prompt = "You are a helpful assistant."
 
     def _convert_to_langgraph_messages(self, messages: list[ChatMessage]) -> list[BaseMessage]:
         """Convert our ChatMessage format to LangGraph's BaseMessage format."""
@@ -93,9 +99,24 @@ class SimpleTestAgent(BaseAgentTemplate, BaseLangGraphAgent):
             # Default to assistant for unknown message types
             role = MessageRole.ASSISTANT
         
+        # Handle both string content and list content
+        content = message.content
+        if isinstance(content, list):
+            # Extract text from content list
+            text_parts = []
+            for item in content:
+                if isinstance(item, dict):
+                    if "text" in item:
+                        text_parts.append(item["text"])
+                    elif "content" in item:
+                        text_parts.append(item["content"])
+                else:
+                    text_parts.append(str(item))
+            content = "".join(text_parts)
+        
         return ChatMessage(
             role=role,
-            content=message.content
+            content=content
         )
 
     async def _build_graph(self):
@@ -108,8 +129,15 @@ class SimpleTestAgent(BaseAgentTemplate, BaseLangGraphAgent):
         else:
             tools = await toolset_client.get_tools()
         
+        # Use parameter-aware client to ensure the LLM is configured with 
+        # the agent's default temperature and max_tokens
+        llm_client = await self.get_llm_client(
+            temperature=self.default_temperature,
+            max_tokens=self.default_max_tokens
+        )
+        
         return create_react_agent(
-            model=await self.get_llm_client(),
+            model=llm_client,  # type: ignore - LLMClient is actually a BaseChatModel at runtime
             tools=tools,
             prompt=self.system_prompt
         )
@@ -124,6 +152,14 @@ class SimpleTestAgent(BaseAgentTemplate, BaseLangGraphAgent):
         """Execute the simple test agent using LangGraph."""
         start_time = time.time()
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+        
+        # Get effective execution parameters using base class helpers
+        # Note: For this LangGraph template using create_react_agent, 
+        # temperature and max_tokens are configured at the LLM client level
+        # rather than passed per execution. This demonstrates the pattern
+        # for templates that do support per-execution parameters.
+        _effective_temperature = self.get_effective_temperature(temperature)
+        _effective_max_tokens = self.get_effective_max_tokens(max_tokens)
         
         try:
             # Get the compiled graph
@@ -186,6 +222,7 @@ class SimpleTestAgent(BaseAgentTemplate, BaseLangGraphAgent):
                     completion_tokens=result.get("usage", {}).get("completion_tokens", 0),
                     total_tokens=result.get("usage", {}).get("total_tokens", 0),
                 ),
+                metadata=metadata,  # Pass through the metadata parameter
             )
             
         except Exception as e:
@@ -201,6 +238,12 @@ class SimpleTestAgent(BaseAgentTemplate, BaseLangGraphAgent):
         """Stream the simple test agent execution using LangGraph."""
         start_time = time.time()
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+        
+        # Get effective execution parameters using base class helpers
+        # Note: Similar to execute(), these parameters would be used in templates
+        # that support per-execution parameter configuration
+        _effective_temperature = self.get_effective_temperature(temperature)
+        _effective_max_tokens = self.get_effective_max_tokens(max_tokens)
         
         try:
             # Get the compiled graph
@@ -249,12 +292,18 @@ class SimpleTestAgent(BaseAgentTemplate, BaseLangGraphAgent):
                                 object="chat.completion.chunk",
                                 created=int(start_time),
                                 model=self.id,
+                                system_fingerprint="fp_simple",  # Required field
                                 choices=[
-                                    {
-                                        "index": 0,
-                                        "delta": {"content": new_content},
-                                        "finish_reason": None,
-                                    },
+                                    ChatCompletionChunkChoice(
+                                        index=0,
+                                        delta=ChatMessageResponse(
+                                            role=MessageRole.ASSISTANT,
+                                            content=new_content,
+                                            timestamp=datetime.now(UTC),
+                                            metadata={}
+                                        ),
+                                        finish_reason=None,
+                                    ),
                                 ],
                             )
             
@@ -264,30 +313,41 @@ class SimpleTestAgent(BaseAgentTemplate, BaseLangGraphAgent):
                 object="chat.completion.chunk",
                 created=int(start_time),
                 model=self.id,
+                system_fingerprint="fp_simple",  # Required field
                 choices=[
-                    {
-                        "index": 0,
-                        "delta": {},
-                        "finish_reason": "stop",
-                    },
+                    ChatCompletionChunkChoice(
+                        index=0,
+                        delta=ChatMessageResponse(
+                            role=MessageRole.ASSISTANT,
+                            content="",
+                            timestamp=datetime.now(UTC),
+                            metadata={}
+                        ),
+                        finish_reason="stop",
+                    ),
                 ],
             )
             
-        except Exception as e:
+        except Exception:
             # Yield error chunk
             yield ChatCompletionChunk(
                 id=completion_id,
                 object="chat.completion.chunk",
                 created=int(start_time),
                 model=self.id,
+                system_fingerprint="fp_simple",  # Required field
                 choices=[
-                    {
-                        "index": 0,
-                        "delta": {},
-                        "finish_reason": "error",
-                    },
+                    ChatCompletionChunkChoice(
+                        index=0,
+                        delta=ChatMessageResponse(
+                            role=MessageRole.ASSISTANT,
+                            content="",
+                            timestamp=datetime.now(UTC),
+                            metadata={}
+                        ),
+                        finish_reason="error",
+                    ),
                 ],
-                error=str(e),
             )
 
     

@@ -3,12 +3,10 @@
 This module provides utilities for LangGraph-based agent templates.
 """
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, Any
+from typing import Any, Optional
 
-from runtime.domain.services.llm.llm_service import LLMService, LLMClient
-from runtime.llm.mcp_client import McpLLMClient
+from runtime.domain.services.llm import LLMService
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -16,7 +14,7 @@ from langchain_deepseek import ChatDeepSeek
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
-
+from ..config import LLMConfig
 class TestChatModel(BaseChatModel):
     """Simple test chat model for testing - no API keys required."""
     
@@ -45,7 +43,7 @@ class LLMConfiguration:
     model: str
     temperature: float = 0.7
     max_tokens: int = 100
-    metadata: Dict[str, Any] = None
+    metadata: dict[str, Any] = None
     
     def __post_init__(self):
         if self.metadata is None:
@@ -55,69 +53,88 @@ class LLMConfiguration:
 class LangGraphLLMService(LLMService):
     """LangGraph LLM Service"""
 
-    async def convert_llm_config_id(self, llm_config_id: str) -> LLMConfiguration:
-        """Convert LLM config ID to configuration.
+    def __init__(self, llm_config: Optional[LLMConfig]=None):
+        """Initialize with LLM configuration.
         
-        For testing purposes, this provides simple fallback configurations.
-        In production, this would look up configurations from a repository.
+        Args:
+            llm_config: LLMConfig pydantic model or dict (for backward compatibility)
         """
-        # Default configurations for testing
-        if llm_config_id == "deepseek" or llm_config_id is None:
-            return LLMConfiguration(
-                provider="test",  # Use test provider for no API key requirement
-                model="test-model",
-                temperature=0.1,
-                max_tokens=1000,
-                metadata={}
-            )
-        elif llm_config_id == "openai":
-            return LLMConfiguration(
-                provider="openai", 
-                model="gpt-3.5-turbo",
-                temperature=0.7,
-                max_tokens=1000,
-                metadata={}
-            )
-        elif llm_config_id == "google":
-            return LLMConfiguration(
-                provider="google",
-                model="gemini-pro",
-                temperature=0.7,
-                max_tokens=1000,
-                metadata={}
-            )
+        if llm_config is None:
+            # Create default configuration
+            self._llm_config = LLMConfig()
         else:
-            # Fallback to test provider for unknown config IDs
-            return LLMConfiguration(
-                provider="test",
-                model="test-model",
-                temperature=0.1,
-                max_tokens=1000,
-                metadata={}
-            )
+            # Use pydantic config directly
+            self._llm_config = llm_config
 
-    async def get_client(self, llm_config_id: str):
-        """Get the LangGraph LLM client"""
+    async def convert_llm_config_id(self, llm_config_id: str) -> LLMConfiguration:
+        """Convert LLM config ID to configuration using validated config.
+        
+        Uses the validated LLM configuration provided during initialization.
+        """
+        # Try to get provider from validated pydantic configuration
+        if llm_config_id in self._llm_config.providers:
+            provider_config = self._llm_config.providers[llm_config_id]
+            return LLMConfiguration(
+                provider=provider_config.type,
+                model=provider_config.model,
+                temperature=provider_config.temperature,
+                max_tokens=provider_config.max_tokens,
+                metadata=provider_config.metadata
+            )
+        
+        # Try default provider if specified
+        default_provider = self._llm_config.default_provider
+        if default_provider and default_provider in self._llm_config.providers:
+            provider_config = self._llm_config.providers[default_provider]
+            return LLMConfiguration(
+                provider=provider_config.type,
+                model=provider_config.model,
+                temperature=provider_config.temperature,
+                max_tokens=provider_config.max_tokens,
+                metadata=provider_config.metadata
+            )
+        
+        # Fallback to test provider
+        return LLMConfiguration(
+            provider="test",
+            model="test-model",
+            temperature=0.1,
+            max_tokens=1000,
+            metadata={}
+        )
+
+    async def get_client(self, llm_config_id: str, **execution_params):
+        """Get the LangGraph LLM client with optional execution parameter overrides.
+        
+        Args:
+            llm_config_id: Configuration ID to determine base client settings
+            **execution_params: Optional overrides (temperature, max_tokens, etc.)
+        """
         llm_config = await self.convert_llm_config_id(llm_config_id)
+        
+        # Override config with execution parameters
+        final_temperature = execution_params.get("temperature", llm_config.temperature)
+        final_max_tokens = execution_params.get("max_tokens", llm_config.max_tokens)
+        
         if llm_config.provider == "openai":
             return ChatOpenAI(
                 model=llm_config.model,
-                temperature=llm_config.temperature,
-                max_tokens=llm_config.max_tokens,
+                temperature=final_temperature,
+                max_tokens=final_max_tokens,
                 **llm_config.metadata
             )
         elif llm_config.provider == "google":
             return ChatGoogleGenerativeAI(
                 model=llm_config.model,
-                temperature=llm_config.temperature,
-                max_tokens=llm_config.max_tokens,
+                temperature=final_temperature,
+                max_tokens=final_max_tokens,
                 **llm_config.metadata
             )
         elif llm_config.provider == "deepseek":
             return ChatDeepSeek(
                 model=llm_config.model,
-                temperature=llm_config.temperature,
-                max_tokens=llm_config.max_tokens,
+                temperature=final_temperature,
+                max_tokens=final_max_tokens,
                 **llm_config.metadata
             )
         elif llm_config.provider == "test":

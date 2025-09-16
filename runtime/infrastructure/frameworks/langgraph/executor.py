@@ -71,10 +71,20 @@ class LangGraphAgentExecutor(AgentExecutorInterface):
             )
             
             # Execute with the instance
+            # Use configuration defaults if parameters are None
+            final_temperature = temperature
+            final_max_tokens = max_tokens
+            
+            # Fallback to configuration defaults if parameters not specified
+            if final_temperature is None:
+                final_temperature = configuration.get("temperature", 0.7)
+            if final_max_tokens is None:
+                final_max_tokens = configuration.get("max_tokens")
+                
             response = await execution_instance.execute(
                 messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
+                temperature=final_temperature,
+                max_tokens=final_max_tokens,
                 metadata=metadata or {}
             )
             
@@ -161,11 +171,21 @@ class LangGraphAgentExecutor(AgentExecutorInterface):
             
             # Check if template supports streaming
             if hasattr(execution_instance, 'stream_execute'):
+                # Use configuration defaults if parameters are None
+                final_temperature = temperature
+                final_max_tokens = max_tokens
+                
+                # Fallback to configuration defaults if parameters not specified
+                if final_temperature is None:
+                    final_temperature = configuration.get("temperature", 0.7)
+                if final_max_tokens is None:
+                    final_max_tokens = configuration.get("max_tokens")
+                
                 chunk_index = 0
                 async for chunk in execution_instance.stream_execute(
                     messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
+                    temperature=final_temperature,
+                    max_tokens=final_max_tokens,
                     metadata=metadata or {}
                 ):
                     # Convert framework chunk to our format
@@ -313,9 +333,42 @@ class LangGraphAgentExecutor(AgentExecutorInterface):
             "agent_name": metadata.get("agent_name", f"Execution Instance ({template_id})"),
         }
         
+        # Convert dict configuration back to AgentConfiguration for templates
+        # The configuration dict comes from AgentConfiguration.get_template_configuration()
+        # We need to reconstruct the AgentConfiguration from this dict
+        from runtime.domain.value_objects.agent_configuration import AgentConfiguration
+        
+        # Extract components from the merged configuration dict
+        system_prompt = configuration.get("system_prompt")
+        llm_config_id = configuration.get("llm_config_id")
+        toolsets = configuration.get("toolset_configs", [])
+        
+        # Extract conversation config parameters
+        conversation_config = {}
+        if "temperature" in configuration:
+            conversation_config["temperature"] = configuration["temperature"]
+        if "max_tokens" in configuration:
+            conversation_config["max_tokens"] = configuration["max_tokens"]
+        if "history_length" in configuration:
+            conversation_config["historyLength"] = configuration["history_length"]
+        
+        # Extract template-specific config (everything else)
+        template_config = {k: v for k, v in configuration.items() 
+                         if k not in {"system_prompt", "llm_config_id", "toolset_configs", 
+                                    "temperature", "max_tokens", "history_length"}}
+        
+        # Reconstruct AgentConfiguration
+        agent_config = AgentConfiguration(
+            system_prompt=system_prompt,
+            llm_config_id=llm_config_id,
+            conversation_config=conversation_config if conversation_config else None,
+            toolsets=toolsets,
+            template_config=template_config
+        )
+        
         # Create temporary instance with services injected
         return template_class(
-            configuration=configuration, 
+            configuration=agent_config, 
             metadata=static_metadata,
             llm_service=self._llm_service,
             toolset_service=self._toolset_service
@@ -325,12 +378,45 @@ class LangGraphAgentExecutor(AgentExecutorInterface):
 class LangGraphFrameworkExecutor(FrameworkExecutor):
     """LangGraph framework executor - pure execution without instance management."""
     
-    def __init__(self):
+    def __init__(self, service_config=None):
+        """Initialize with optional service configuration.
+        
+        Args:
+            service_config: Service configuration data from application layer
+        """
         super().__init__()
         self._template_classes = None
         self._agent_executor = None
         self._llm_service = None
         self._toolset_service = None
+        self._framework_config = None
+        
+        # Validate and store configuration during initialization
+        self._initialize_configuration(service_config)
+    
+    def _initialize_configuration(self, service_config):
+        """Initialize and validate framework configuration."""
+        from .config import LangGraphFrameworkConfig
+        from runtime.service_config import service_config as global_service_config
+        
+        try:
+            # Get configuration data
+            if service_config:
+                config_data = service_config
+            else:
+                # Use global service config
+                config_data = {
+                    "llm": global_service_config.get_llm_config(),
+                    "toolsets": {"toolsets": global_service_config.get_toolset_config()}
+                }
+            
+            # Validate configuration using pydantic models
+            self._framework_config = LangGraphFrameworkConfig.from_dict(config_data)
+            logger.info("LangGraph framework configuration validated successfully")
+                
+        except Exception as e:
+            logger.error(f"Failed to validate LangGraph framework configuration: {e}")
+            raise e
     
     @property
     def name(self) -> str:
@@ -369,24 +455,32 @@ class LangGraphFrameworkExecutor(FrameworkExecutor):
         return self.create_agent_executor().get_supported_templates()
     
     def get_llm_service(self) -> Any:
-        """Get framework-specific LLM service."""
+        """Get framework-specific LLM service with validated configuration."""
         if self._llm_service is None:
-            # Initialize LangGraph LLM service
             try:
-                self._llm_service = LangGraphLLMService()
+                # Pass validated pydantic config class directly
+                self._llm_service = LangGraphLLMService(self._framework_config.llm)
+                logger.info("LangGraph LLM service initialized with validated pydantic configuration")
             except ImportError:
                 logger.warning("LangGraph LLM service not available")
+                self._llm_service = None
+            except Exception as e:
+                logger.error(f"Failed to initialize LangGraph LLM service: {e}")
                 self._llm_service = None
         return self._llm_service
     
     def get_toolset_service(self) -> Any:
-        """Get framework-specific toolset service."""
+        """Get framework-specific toolset service with validated configuration."""
         if self._toolset_service is None:
-            # Initialize LangGraph toolset service
             try:
-                self._toolset_service = LangGraphToolsetService()
+                # Pass validated pydantic config class directly
+                self._toolset_service = LangGraphToolsetService(self._framework_config.toolsets)
+                logger.info("LangGraph toolset service initialized with validated pydantic configuration")
             except ImportError:
                 logger.warning("LangGraph toolset service not available")
+                self._toolset_service = None
+            except Exception as e:
+                logger.error(f"Failed to initialize LangGraph toolset service: {e}")
                 self._toolset_service = None
         return self._toolset_service
     

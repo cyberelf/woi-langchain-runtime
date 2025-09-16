@@ -69,4 +69,25 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "--strict-markers --strict-config --verbose" 
 
+[tool.pyright]
+# Match ruff's lenient type checking
+typeCheckingMode = "basic"
+# Don't report missing type annotations (like ruff)
+reportMissingTypeStubs = false
+reportMissingParameterType = false
+reportMissingReturnType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownLambdaType = false
+reportUnknownMemberType = false
+reportUntypedFunctionDecorator = false
+reportUntypedClassDecorator = false
+reportUntypedNamedTuple = false
+reportPrivateUsage = false
+reportUnnecessaryIsInstance = false
+# Keep only important type errors
+reportInvalidTypeVarUsage = true
+reportSelfClsParameterName = true
+# Ignore venv
+exclude = ["**/.venv", "**/venv", "**/env", "**/envs"]
 

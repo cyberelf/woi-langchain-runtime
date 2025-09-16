@@ -136,6 +136,31 @@ class TestAgentConfigurationModel:
         assert merged["regular_setting"] == "value"
         assert "conversation" not in merged
 
+    def test_to_agent_configuration(self):
+        """Test conversion from web model to domain model."""
+        config = AgentConfigurationModel(
+            template_config={"template_setting": "value"},
+            system_prompt="You are a helpful assistant",
+            conversation_config={"temperature": 0.8, "max_tokens": 1000},
+            toolsets=["web_search", "calculator"],
+            llm_config_id="openai-gpt4",
+        )
+
+        domain_config = config.to_agent_configuration()
+        
+        from runtime.domain.value_objects.agent_configuration import AgentConfiguration
+        assert isinstance(domain_config, AgentConfiguration)
+        assert domain_config.system_prompt == "You are a helpful assistant"
+        assert domain_config.llm_config_id == "openai-gpt4"
+        assert domain_config.conversation_config == {"temperature": 0.8, "max_tokens": 1000}
+        assert domain_config.toolsets == ["web_search", "calculator"]
+        assert domain_config.template_config == {"template_setting": "value"}
+        
+        # Test helper methods
+        assert domain_config.get_temperature() == 0.8
+        assert domain_config.get_max_tokens() == 1000
+        assert domain_config.get_toolset_names() == ["web_search", "calculator"]
+
 
 class TestCreateAgentRequestParsing:
     """Test the new parsing functionality in CreateAgentRequest."""
@@ -168,11 +193,18 @@ class TestCreateAgentRequestParsing:
         assert template.template_id == "simple-test"
         assert template.template_version_id == "1.0.0"
 
-        # Test configuration parsing
-        config = request.get_agent_configuration()
-        assert isinstance(config, AgentConfigurationModel)
-        assert config.template_config == {"setting": "value"}
-        assert config.system_prompt == "You are helpful"
+        # Test configuration parsing (web model)
+        config_model = request.get_agent_configuration_model()
+        assert isinstance(config_model, AgentConfigurationModel)
+        assert config_model.template_config == {"setting": "value"}
+        assert config_model.system_prompt == "You are helpful"
+        
+        # Test configuration parsing (domain model)
+        domain_config = request.get_agent_configuration()
+        from runtime.domain.value_objects.agent_configuration import AgentConfiguration
+        assert isinstance(domain_config, AgentConfiguration)
+        assert domain_config.template_config == {"setting": "value"}
+        assert domain_config.system_prompt == "You are helpful"
 
     def test_backward_compatibility(self):
         """Test that existing methods still work correctly."""

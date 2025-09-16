@@ -60,6 +60,22 @@ class AgentConfigurationModel(BaseModel):
                 template_config.pop("conversation")
             config.update(template_config)
         return config
+    
+    def to_agent_configuration(self):
+        """Convert web model to domain AgentConfiguration.
+        
+        Returns:
+            AgentConfiguration domain value object
+        """
+        from ....domain.value_objects.agent_configuration import AgentConfiguration
+        
+        return AgentConfiguration(
+            system_prompt=self.system_prompt,
+            llm_config_id=self.llm_config_id,
+            conversation_config=self.conversation_config,
+            toolsets=self.toolsets or [],
+            template_config=self.template_config or {}
+        )
 
 
 class CreateAgentRequest(BaseModel):
@@ -127,8 +143,19 @@ class CreateAgentRequest(BaseModel):
             template_version_id=self.template_version_id,
         )
 
-    def get_agent_configuration(self) -> AgentConfigurationModel:
-        """Parse configuration-related fields into AgentConfigurationModel."""
+    def get_agent_configuration(self):
+        """Parse configuration-related fields into domain AgentConfiguration."""
+        web_config = AgentConfigurationModel(
+            template_config=self.template_config,
+            system_prompt=self.system_prompt,
+            conversation_config=self.conversation_config,
+            toolsets=self.toolsets,
+            llm_config_id=self.llm_config_id
+        )
+        return web_config.to_agent_configuration()
+    
+    def get_agent_configuration_model(self) -> AgentConfigurationModel:
+        """Parse configuration-related fields into AgentConfigurationModel (for backward compatibility)."""
         return AgentConfigurationModel(
             template_config=self.template_config,
             system_prompt=self.system_prompt,
@@ -143,12 +170,12 @@ class CreateAgentRequest(BaseModel):
     
     def get_configuration(self) -> dict:
         """Get merged configuration from template_config and configuration."""
-        return self.get_agent_configuration().get_configuration()
+        return self.get_agent_configuration_model().get_configuration()
     
     def get_metadata(self) -> dict:
         """Get metadata with additional fields."""
         identity = self.get_identity()
-        config = self.get_agent_configuration()
+        config = self.get_agent_configuration_model()
         
         meta = {}
         if identity.description:

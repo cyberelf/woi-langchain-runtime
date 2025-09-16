@@ -1,7 +1,6 @@
 """Create agent application service - Use case implementation."""
 
 import logging
-from typing import List
 
 from ...domain.entities.agent import Agent
 from ...domain.services.agent_validation_service import AgentValidationService
@@ -22,7 +21,7 @@ class CreateAgentService:
     def __init__(self, uow: UnitOfWorkInterface):
         self.uow = uow
         self.validation_service = AgentValidationService()
-        self._events: List[object] = []
+        self._events: list[object] = []
     
     async def execute(self, command: CreateAgentCommand) -> Agent:
         """Execute the create agent use case.
@@ -76,7 +75,7 @@ class CreateAgentService:
                 await self.uow.rollback()
                 raise
     
-    def get_events(self) -> List[object]:
+    def get_events(self) -> list[object]:
         """Get domain events raised during execution."""
         return self._events.copy()
     

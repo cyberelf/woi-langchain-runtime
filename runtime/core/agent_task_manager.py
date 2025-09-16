@@ -545,14 +545,26 @@ class AgentTaskManager:
         )
         
         try:
+            # Get execution parameters from agent configuration
+            agent_exec_params = instance.agent.get_execution_params()
+            
+            # Merge agent defaults with request overrides (request takes precedence)
+            final_temperature = task_request.temperature
+            if final_temperature is None:
+                final_temperature = agent_exec_params.get("temperature")
+            
+            final_max_tokens = task_request.max_tokens
+            if final_max_tokens is None:
+                final_max_tokens = agent_exec_params.get("max_tokens")
+            
             # Execute using framework agent
             response = await instance.framework_agent.execute(
                 template_id=instance.agent.template_id,
                 template_version=instance.agent.template_version or "v1.0.0",
-                configuration=instance.agent.configuration,
+                configuration=instance.agent.get_template_configuration(),
                 messages=task_request.messages,
-                temperature=task_request.temperature,
-                max_tokens=task_request.max_tokens,
+                temperature=final_temperature,
+                max_tokens=final_max_tokens,
                 metadata={
                     # Agent static context
                     "agent_id": instance.agent_id,
@@ -617,15 +629,27 @@ class AgentTaskManager:
         )
         
         try:
+            # Get execution parameters from agent configuration
+            agent_exec_params = instance.agent.get_execution_params()
+            
+            # Merge agent defaults with request overrides (request takes precedence)
+            final_temperature = task_request.temperature
+            if final_temperature is None:
+                final_temperature = agent_exec_params.get("temperature")
+            
+            final_max_tokens = task_request.max_tokens
+            if final_max_tokens is None:
+                final_max_tokens = agent_exec_params.get("max_tokens")
+            
             # Stream execution
             chunk_count = 0
             async for chunk in instance.framework_agent.stream_execute(
                 template_id=instance.agent.template_id,
                 template_version=instance.agent.template_version or "v1.0.0",
-                configuration=instance.agent.configuration,
+                configuration=instance.agent.get_template_configuration(),
                 messages=task_request.messages,
-                temperature=task_request.temperature,
-                max_tokens=task_request.max_tokens,
+                temperature=final_temperature,
+                max_tokens=final_max_tokens,
                 metadata={
                     # Agent static context
                     "agent_id": instance.agent_id,
