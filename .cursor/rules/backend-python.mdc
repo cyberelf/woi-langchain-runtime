@@ -1,5 +1,7 @@
 ---
-alwaysApply: true
+description: 
+globs: *.py,ai-platform-backend/**/*
+alwaysApply: false
 ---
 # Python Backend Standards
 
@@ -41,11 +43,14 @@ The backend server implementation must adhere to these standards for consistency
 - Use Pydantic models for request/response bodies
 - Type hints must be used throughout the codebase
 - No use of `Any` type except in documented special cases
-- Run mypy for type checking as part of CI/CD pipeline
+- Utilize `Union`, `Optional`, and other typing extensions when appropriate
+- Run `pyright` for type checking as part of CI/CD pipeline
+- **NEVER use dynamic attribute testing or fetching** with `hasattr()`, `getattr()`, `setattr()`, or similar functions
+- Use explicit type checking and proper object-oriented design instead of dynamic attribute access
 
 ## Pydantic Models
-- All data models must be defined as Pydantic v2 BaseModel classes
-- Use strict type validation with `extra="forbid"`
+- All data models must be defined as Pydantic BaseModel classes
+- Use strict type validation with `Config.extra = 'forbid'`
 - Implement comprehensive field validators
 - Use Pydantic's schema_extra for OpenAPI documentation
 - Define clear error responses using appropriate HTTP status codes

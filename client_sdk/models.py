@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from enum import Enum
 
 
@@ -23,7 +23,7 @@ class ChatMessage(BaseModel):
 
 # API Request Models
 class CreateAgentRequest(BaseModel):
-    """Request model for creating a new agent - matches API specification."""
+    """Request model for creating a new agent - matches server API specification exactly."""
     # Core fields - following API specification
     id: str = Field(..., description="Agent line ID (logical identifier)")
     name: str = Field(..., description="Agent name")
@@ -33,8 +33,7 @@ class CreateAgentRequest(BaseModel):
     
     # Template fields - following API specification
     template_id: str = Field(..., description="Template type identifier")
-    template_version: Optional[str] = Field(None, description="The version of the template to use.")
-    template_version_id: str = Field(..., description="Template version string")
+    template_version_id: Optional[str] = Field("1.0.0", description="Template version string")
     
     # Configuration fields
     system_prompt: Optional[str] = Field(None, description="System prompt")
@@ -44,14 +43,22 @@ class CreateAgentRequest(BaseModel):
     template_config: Optional[dict] = Field(None, description="Template configuration")
 
     # Metadata - following API specification
-    agent_line_id: str = Field(..., description="Agent line ID")
+    agent_line_id: Optional[str] = Field(None, description="Agent line ID")
     version_type: Optional[str] = Field("beta", description="Version type: beta or release (default: beta)")
     version_number: Optional[str] = Field("v1", description="Version number: 'v1', 'v2', etc. (default: v1)")
-    owner_id: str = Field(..., description="Agent owner ID for beta access control")
+    owner_id: Optional[str] = Field(None, description="Agent owner ID for beta access control")
     status: Optional[str] = Field(
         "draft", 
         description="Agent status: draft, submitted, pending, published, revoked (default: draft)"
     )
+    
+    @model_validator(mode="before")
+    @classmethod
+    def set_agent_line_id_default(cls, values):
+        """Set agent_line_id to id if not provided - matches server behavior."""
+        if values.get("agent_line_id") is None and "id" in values:
+            values["agent_line_id"] = values["id"]
+        return values
 
 # Backward compatibility alias
 AgentCreateRequest = CreateAgentRequest
@@ -61,12 +68,12 @@ AgentCreateRequest = CreateAgentRequest
 @dataclass
 class TemplateInfo:
     """Information about an available template."""
-    template_id: str
-    template_name: str
+    id: str
+    name: str
     version: str
     framework: str
     description: str
-    metadata: dict
+    config: list[dict]
 
 
 @dataclass
@@ -109,21 +116,32 @@ class ChatCompletionResponse(BaseModel):
     usage: ChatUsage
 
 
-class ChatCompletionChunkChoice(BaseModel):
-    """A single choice in a streaming chat completion chunk."""
-    delta: ChatMessage
-    finish_reason: Optional[str] = None
+class StreamingChunkDelta(BaseModel):
+    """Delta content for streaming chunks - OpenAI API compliant."""
+    role: Optional[str] = None  # Only present in first chunk
+    content: Optional[str] = None  # Incremental content
+
+
+class StreamingChunkChoice(BaseModel):
+    """A single choice in a streaming chat completion chunk - OpenAI API compliant."""
     index: int
+    delta: StreamingChunkDelta
+    finish_reason: Optional[str] = None
 
 
-class ChatCompletionChunk(BaseModel):
-    """A chunk of a streaming chat completion response."""
+class StreamingChunk(BaseModel):
+    """A chunk of a streaming chat completion response - OpenAI API compliant."""
     id: str
-    choices: list[ChatCompletionChunkChoice]
+    object: str = "chat.completion.chunk"
     created: int
     model: str
-    object: str = "chat.completion.chunk"
-    system_fingerprint: str
+    system_fingerprint: Optional[str] = None
+    choices: list[StreamingChunkChoice]
+
+
+# Backward compatibility aliases
+ChatCompletionChunkChoice = StreamingChunkChoice
+ChatCompletionChunk = StreamingChunk
 
 
 # Status Enums
@@ -142,9 +160,15 @@ __all__ = [
     "ChatChoice",
     "ChatCompletionChoice",  # Alias
     "ChatCompletionResponse",
-    "ChatCompletionChunk",
     "ChatUsage",
     "MessageRole",
     "TemplateInfo",
     "RuntimeStatus",
+    # New OpenAI-compliant streaming models
+    "StreamingChunk",
+    "StreamingChunkChoice", 
+    "StreamingChunkDelta",
+    # Backward compatibility aliases
+    "ChatCompletionChunk",
+    "ChatCompletionChunkChoice",
 ]

@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from enum import Enum
-from typing import Dict, Any, Optional
+from typing import Any, Optional
 
 
 class MessageRole(Enum):
@@ -39,7 +39,7 @@ class ChatMessage:
             raise ValueError("Metadata must be a dictionary")
     
     @classmethod
-    def create_user_message(cls, content: str, metadata: Optional[Dict[str, Any]] = None) -> "ChatMessage":
+    def create_user_message(cls, content: str, metadata: Optional[dict[str, Any]] = None) -> "ChatMessage":
         """Create a user message."""
         return cls(
             role=MessageRole.USER,
@@ -49,7 +49,7 @@ class ChatMessage:
         )
     
     @classmethod
-    def create_assistant_message(cls, content: str, metadata: Optional[Dict[str, Any]] = None) -> "ChatMessage":
+    def create_assistant_message(cls, content: str, metadata: Optional[dict[str, Any]] = None) -> "ChatMessage":
         """Create an assistant message."""
         return cls(
             role=MessageRole.ASSISTANT,
@@ -59,7 +59,7 @@ class ChatMessage:
         )
     
     @classmethod
-    def create_system_message(cls, content: str, metadata: Optional[Dict[str, Any]] = None) -> "ChatMessage":
+    def create_system_message(cls, content: str, metadata: Optional[dict[str, Any]] = None) -> "ChatMessage":
         """Create a system message."""
         return cls(
             role=MessageRole.SYSTEM,
@@ -80,7 +80,7 @@ class ChatMessage:
         """Check if this is a system message."""
         return self.role == MessageRole.SYSTEM
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         return {
             "role": self.role.value,
@@ -90,7 +90,7 @@ class ChatMessage:
         }
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ChatMessage":
+    def from_dict(cls, data: dict[str, Any]) -> "ChatMessage":
         """Create ChatMessage from dictionary representation."""
         return cls(
             role=MessageRole(data["role"]),

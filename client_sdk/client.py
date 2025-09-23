@@ -4,6 +4,7 @@ This module provides a high-level client interface for interacting with
 the agent runtime via HTTP.
 """
 
+import json
 import logging
 from collections.abc import AsyncGenerator
 from typing import Any, Optional
@@ -11,17 +12,17 @@ import httpx
 
 from .models import (
     AgentInfo,
-    ChatCompletionChunk,
     ChatCompletionResponse,
     ChatMessage,
     CreateAgentRequest,
     RuntimeStatus,
+    StreamingChunk,
     TemplateInfo,
 )
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BASE_URL = "http://localhost:8000/api/v1/"
+DEFAULT_BASE_URL = "http://localhost:8000/v1/"
 
 
 class RuntimeClient:
@@ -35,16 +36,31 @@ class RuntimeClient:
     - Runtime health monitoring
     """
 
-    def __init__(self, base_url: str = DEFAULT_BASE_URL, timeout: float = 30.0):
+    def __init__(
+        self, base_url: str = DEFAULT_BASE_URL, api_key: Optional[str] = None, timeout: float = 30.0
+    ):
         """
         Initialize the runtime client.
         
         Args:
             base_url: The base URL of the runtime API.
+            api_key: The API key (runtime token) for authentication. 
+                If None, requests will be made without authentication.
             timeout: Default timeout for HTTP requests.
         """
         self.base_url = base_url
-        self.http_client = httpx.AsyncClient(base_url=self.base_url, timeout=timeout)
+        self.api_key = api_key
+        
+        # Set up default headers
+        headers = {}
+        if self.api_key:
+            headers["X-Runtime-Token"] = self.api_key
+        
+        self.http_client = httpx.AsyncClient(
+            base_url=self.base_url, 
+            headers=headers,
+            timeout=timeout
+        )
         self._status = RuntimeStatus.DISCONNECTED
 
     async def shutdown(self) -> None:
@@ -75,7 +91,19 @@ class RuntimeClient:
             self._status = RuntimeStatus.CONNECTED
             return response
         except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error for {e.request.method} {e.request.url}: {e.response.status_code} - {e.response.text}")
+            # Provide more specific error messages for authentication failures
+            if e.response.status_code == 401:
+                logger.error(f"Authentication failed: {e.response.text}")
+                self._status = RuntimeStatus.ERROR
+                raise httpx.HTTPStatusError(
+                    message=f"Authentication failed. Please check your API key. Details: {e.response.text}",
+                    request=e.request,
+                    response=e.response
+                )
+            logger.error(
+                f"HTTP error for {e.request.method} {e.request.url}: "
+                f"{e.response.status_code} - {e.response.text}"
+            )
             self._status = RuntimeStatus.ERROR
             raise
         except httpx.RequestError as e:
@@ -92,7 +120,8 @@ class RuntimeClient:
             params["framework"] = framework
         
         response = await self._request("GET", "templates/", params=params)
-        return [TemplateInfo(**t) for t in response.json()]
+        response_data = response.json()
+        return [TemplateInfo(**t) for t in response_data.get("templates", [])]
 
     async def get_template(self, template_id: str, version: Optional[str] = None) -> Optional[TemplateInfo]:
         """Get information about a specific template."""
@@ -161,17 +190,19 @@ class RuntimeClient:
         self,
         agent_id: str,
         messages: list[ChatMessage]
-    ) -> AsyncGenerator[ChatCompletionChunk, None]:
+    ) -> AsyncGenerator[StreamingChunk, None]:
         """Stream chat response from an agent."""
         payload = {"messages": [msg.model_dump() for msg in messages]}
-        async with self.http_client.stream("POST", f"agents/{agent_id}/chat/stream", json=payload) as response:
+        endpoint = f"agents/{agent_id}/chat/stream"
+        async with self.http_client.stream("POST", endpoint, json=payload) as response:
             response.raise_for_status()
             async for line in response.aiter_lines():
                 if line.startswith("data: "):
                     data = line[len("data: "):]
                     if data.strip() == "[DONE]":
                         break
-                    yield ChatCompletionChunk.model_validate(data)
+                    chunk_data = json.loads(data)
+                    yield StreamingChunk.model_validate(chunk_data)
 
     # Health and Status Methods
 
@@ -188,25 +219,28 @@ class RuntimeClient:
 
 
 # Convenience function for creating a client
-async def create_client(base_url: str = DEFAULT_BASE_URL) -> "RuntimeClient":
+async def create_client(
+    base_url: str = DEFAULT_BASE_URL, api_key: Optional[str] = None
+) -> "RuntimeClient":
     """
     Create a runtime client.
     
     Args:
         base_url: The base URL for the runtime API.
+        api_key: The API key (runtime token) for authentication.
 
     Returns:
         A RuntimeClient instance.
     """
-    return RuntimeClient(base_url=base_url)
+    return RuntimeClient(base_url=base_url, api_key=api_key)
 
 
 # Context manager for automatic cleanup
 class RuntimeClientContext:
     """Context manager for automatic client initialization and cleanup."""
     
-    def __init__(self, base_url: str = DEFAULT_BASE_URL):
-        self._client = RuntimeClient(base_url=base_url)
+    def __init__(self, base_url: str = DEFAULT_BASE_URL, api_key: Optional[str] = None):
+        self._client = RuntimeClient(base_url=base_url, api_key=api_key)
     
     async def __aenter__(self) -> "RuntimeClient":
         # No explicit initialization needed anymore.

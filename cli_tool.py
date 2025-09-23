@@ -6,12 +6,16 @@ A comprehensive command-line interface for the LangChain Agent Runtime,
 providing template discovery, agent management, and interactive chat sessions.
 
 Usage:
-    cli_tool.py templates list                  # List all available templates
-    cli_tool.py agents list                     # List all existing agents  
-    cli_tool.py agents create <template_id>     # Create a new agent
-    cli_tool.py agents delete <agent_id>        # Delete an agent
-    cli_tool.py chat <agent_id>                 # Start interactive chat session
-    cli_tool.py health                          # Show runtime health status
+    cli_tool.py [--api-key KEY] templates list              # List all available templates
+    cli_tool.py [--api-key KEY] agents list                 # List all existing agents  
+    cli_tool.py [--api-key KEY] agents create <template_id> # Create a new agent
+    cli_tool.py [--api-key KEY] agents delete <agent_id>    # Delete an agent
+    cli_tool.py [--api-key KEY] chat <agent_id>             # Start interactive chat session
+    cli_tool.py [--api-key KEY] health                      # Show runtime health status
+
+Authentication:
+    Set RUNTIME_API_KEY environment variable or use --api-key option
+    Set RUNTIME_BASE_URL environment variable or use --base-url option (default: http://localhost:8000/v1/)
 """
 
 import asyncio
@@ -19,38 +23,55 @@ import json
 import os
 import sys
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Optional
+import dotenv
 
 import click
 from tabulate import tabulate
 
-from client_sdk import RuntimeClient, RuntimeClientContext
-from runtime.infrastructure.web.models.requests import CreateAgentRequest
-from runtime.domain.value_objects.chat_message import ChatMessage, MessageRole
+from client_sdk import RuntimeClient, RuntimeClientContext, CreateAgentRequest, ChatMessage, MessageRole
 
+dotenv.load_dotenv()
 
 # Global client instance  
-client = None  # type: Optional[RuntimeClient]
+client: Optional[RuntimeClient] = None
 
 
-async def get_client():
-    """Get or create the global client instance."""
+async def get_client(ctx: Optional[click.Context] = None):
+    """Get or create the global client instance with API key support."""
     global client
     if client is None:
-        client = RuntimeClient()
-        await client.initialize()
+        # Get configuration from CLI context or environment variables
+        if ctx and ctx.obj:
+            base_url = ctx.obj.get('base_url', os.getenv("RUNTIME_BASE_URL", "http://localhost:8000/v1/"))
+            api_key = ctx.obj.get('api_key', os.getenv("RUNTIME_API_KEY"))
+        else:
+            base_url = os.getenv("RUNTIME_BASE_URL", "http://localhost:8000/v1/")
+            api_key = os.getenv("RUNTIME_API_KEY")
+        
+        client = RuntimeClient(base_url=base_url, api_key=api_key)
     return client
 
 
 @click.group()
 @click.option('--debug', is_flag=True, help='Enable debug mode')
 @click.option('--json-output', is_flag=True, help='Output results in JSON format')
+@click.option(
+    '--api-key', envvar='RUNTIME_API_KEY', 
+    help='API key for authentication (or set RUNTIME_API_KEY env var)'
+)
+@click.option(
+    '--base-url', envvar='RUNTIME_BASE_URL', 
+    default='http://localhost:8000/v1/', help='Runtime API base URL'
+)
 @click.pass_context
-def cli(ctx, debug: bool, json_output: bool):
+def cli(ctx, debug: bool, json_output: bool, api_key: Optional[str], base_url: str):
     """LangChain Agent Runtime CLI Tool"""
     ctx.ensure_object(dict)
     ctx.obj['debug'] = debug
     ctx.obj['json_output'] = json_output
+    ctx.obj['api_key'] = api_key
+    ctx.obj['base_url'] = base_url
     
     if debug:
         import logging
@@ -69,14 +90,17 @@ def templates():
 async def list_templates(ctx, framework: Optional[str]):
     """List all available templates"""
     try:
-        async with RuntimeClientContext() as runtime_client:
+        async with RuntimeClientContext(
+            base_url=ctx.obj['base_url'], 
+            api_key=ctx.obj['api_key']
+        ) as runtime_client:
             template_list = await runtime_client.list_templates(framework)
             
             if ctx.obj['json_output']:
                 template_data = [
                     {
-                        'template_id': t.template_id,
-                        'name': t.template_name,
+                        'template_id': t.id,
+                        'name': t.name,
                         'version': t.version,
                         'framework': t.framework,
                         'description': t.description
@@ -91,7 +115,10 @@ async def list_templates(ctx, framework: Optional[str]):
                 
                 headers = ['Template ID', 'Name', 'Version', 'Framework', 'Description']
                 table_data = [
-                    [t.template_id, t.template_name, t.version, t.framework, t.description[:50] + '...' if len(t.description) > 50 else t.description]
+                    [
+                        t.id, t.name, t.version, t.framework, 
+                        t.description[:50] + '...' if len(t.description) > 50 else t.description
+                    ]
                     for t in template_list
                 ]
                 
@@ -119,26 +146,20 @@ async def show_template(ctx, template_id: str, version: Optional[str]):
             
             if ctx.obj['json_output']:
                 template_data = {
-                    'template_id': template.template_id,
-                    'name': template.template_name,
+                    'template_id': template.id,
+                    'name': template.name,
                     'version': template.version,
                     'framework': template.framework,
                     'description': template.description,
-                    'metadata': template.metadata
                 }
                 click.echo(json.dumps(template_data, indent=2))
             else:
                 click.echo(f"\nTemplate Details:")
-                click.echo(f"  ID: {template.template_id}")
-                click.echo(f"  Name: {template.template_name}")
+                click.echo(f"  ID: {template.id}")
+                click.echo(f"  Name: {template.name}")
                 click.echo(f"  Version: {template.version}")
                 click.echo(f"  Framework: {template.framework}")
                 click.echo(f"  Description: {template.description}")
-                
-                if template.metadata:
-                    click.echo(f"  Metadata:")
-                    for key, value in template.metadata.items():
-                        click.echo(f"    {key}: {value}")
                         
     except Exception as e:
         click.echo(f"Error showing template: {e}", err=True)
@@ -267,16 +288,20 @@ async def create_agent(ctx, template_id: str, agent_id: Optional[str], name: Opt
                 id=agent_id,
                 name=name,
                 description=description,
-                type=template_id,  # Agent type from template
+                avatar_url=None,
+                type=template_id,
                 template_id=template_id,
-                template_version_id=version or "v1.0.0",  # Required field
+                template_version_id=version,  # Updated: removed template_version
                 template_config={},
                 system_prompt=system_prompt,
-                agent_line_id=agent_id,  # Use agent_id as line_id
-                owner_id="cli-user",  # Default owner for CLI
-                llm_config_id=llm_config,
+                conversation_config={},
                 toolsets=[],
-                conversation_config={}
+                llm_config_id=llm_config,
+                agent_line_id=None,  # Will be auto-populated from id by validator
+                version_type="beta",
+                version_number="v1",
+                owner_id="cli-example",  # Optional but provided
+                status="draft"
             )
             
             # Create the agent
@@ -407,8 +432,8 @@ async def chat(ctx, agent_id: str, stream: bool):
                         click.echo(f"{agent_prefix}: ", nl=False)
                         response_content = ""
                         async for chunk in runtime_client.stream_chat_with_agent(agent_id, conversation_history):
-                            if chunk.choices and chunk.choices[0].get("delta", {}).get("content"):
-                                content = chunk.choices[0]["delta"]["content"]
+                            if chunk.choices and chunk.choices[0].delta.content:
+                                content = chunk.choices[0].delta.content
                                 response_content += content
                                 click.echo(content, nl=False)
                         click.echo()  # New line after streaming
@@ -447,7 +472,7 @@ async def health(ctx):
     """Show runtime health status"""
     try:
         async with RuntimeClientContext() as runtime_client:
-            health_status = runtime_client.get_health_status()
+            health_status = await runtime_client.get_health_status()
             
             if ctx.obj['json_output']:
                 click.echo(json.dumps(health_status, indent=2))

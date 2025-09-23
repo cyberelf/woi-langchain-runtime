@@ -5,14 +5,13 @@ utilities for template discovery and management.
 """
 
 from .base import BaseLangGraphAgent
-from .conversation import ConversationAgent
 from .simple import SimpleTestAgent
+from .workflow import WorkflowAgent
 
 # Template registry for this framework
 _TEMPLATE_CLASSES = {
-    "langgraph-base-agent": BaseLangGraphAgent,
-    "langgraph-simple-test": SimpleTestAgent,
-    "customer-service-bot": ConversationAgent,
+    "simple-test": SimpleTestAgent,
+    "workflow": WorkflowAgent,
 }
 
 
@@ -52,8 +51,8 @@ def register_template(template_id: str, template_class: type) -> None:
 
 __all__ = [
     "BaseLangGraphAgent",
-    "ConversationAgent", 
     "SimpleTestAgent",
+    "WorkflowAgent",
     "get_langgraph_templates",
     "get_langgraph_template_classes",
     "register_template",

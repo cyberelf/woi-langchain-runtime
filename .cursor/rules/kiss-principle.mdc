@@ -1,0 +1,74 @@
+---
+alwaysApply: true
+description: "KISS principle enforcement for maintaining simple, readable, and maintainable code"
+---
+
+# KISS Principle - Keep It Simple, Stupid
+
+## Core Philosophy
+Always choose the simplest solution that works. Complexity should only be added when absolutely necessary and with clear justification.
+
+## Implementation Guidelines
+
+### **Code Simplicity**
+- **Prefer explicit over clever**: Write code that is immediately understandable
+- **One responsibility per function/class**: Follow single responsibility principle strictly
+- **Avoid premature optimization**: Focus on correctness first, optimize when needed
+- **Use descriptive names**: Variable and function names should explain their purpose
+
+### **Architecture Decisions**
+- **Start with in-memory implementations** before adding database complexity
+- **Use existing patterns**: Follow established patterns in the codebase (DDD, Repository pattern)
+- **Avoid over-abstraction**: Don't create interfaces until you have multiple implementations
+- **Direct dependencies over factories** when only one implementation exists
+
+### **Feature Implementation**
+- **Minimum viable implementation first**: Get basic functionality working before adding bells and whistles
+- **Progressive enhancement**: Add complexity incrementally with clear benefits
+- **Configuration over code**: Use configuration files instead of hardcoded values
+- **Standard libraries over custom solutions**: Use well-tested libraries when available
+
+### **Error Handling**
+- **Simple error messages**: Clear, actionable error messages for users
+- **Fail fast**: Validate inputs early and provide immediate feedback
+- **Graceful degradation**: System should continue working when non-critical components fail
+- **Log for debugging**: Include enough context for troubleshooting without noise
+
+### **Testing Strategy**
+- **Test the happy path first**: Ensure basic functionality works before edge cases
+- **Simple test setup**: Minimize test fixture complexity
+- **Clear test names**: Test names should describe what they verify
+- **Mock only external dependencies**: Don't mock internal code unnecessarily
+
+### **Code Review Checklist**
+Before implementing any feature, ask:
+1. **Is this the simplest solution that works?**
+2. **Can this be understood by someone else in 6 months?**
+3. **Does this solve the actual problem or an imagined one?**
+4. **Can this be implemented with existing patterns/tools?**
+5. **What happens if this fails? Is it graceful?**
+
+### **Anti-Patterns to Avoid**
+- ❌ **Over-engineering**: Creating complex solutions for simple problems
+- ❌ **Premature abstraction**: Adding interfaces/abstractions before they're needed
+- ❌ **Feature creep**: Adding "nice to have" features during core implementation
+- ❌ **Magic numbers/strings**: Use constants or configuration instead
+- ❌ **Deep nesting**: Prefer early returns and guard clauses
+- ❌ **Long parameter lists**: Use configuration objects or builders
+
+### **Current Project Context**
+When implementing missing features from [MISSING_FEATURES_TASKS.md](mdc:MISSING_FEATURES_TASKS.md):
+- **File tools**: Simple, secure file operations with clear error messages
+- **Web tools**: Basic HTTP requests with security validation
+- **Agent templates**: Follow existing template patterns in [runtime/infrastructure/frameworks/langgraph/templates/](mdc:runtime/infrastructure/frameworks/langgraph/templates/)
+- **CRUD operations**: Use existing service patterns from [runtime/application/](mdc:runtime/application/)
+
+### **When Complexity is Justified**
+Add complexity only when:
+- **Security requirements** demand it (input validation, sanitization)
+- **Performance bottlenecks** are measured and confirmed
+- **Scalability needs** are demonstrated with real usage
+- **Integration requirements** with external systems necessitate it
+- **Business rules** are inherently complex and cannot be simplified
+
+Remember: **"Simplicity is the ultimate sophistication"** - Leonardo da Vinci

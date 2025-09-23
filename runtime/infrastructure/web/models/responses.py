@@ -1,6 +1,6 @@
 """Web layer response models - Infrastructure layer."""
 
-from typing import Any, Optional, List
+from typing import Any, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -57,39 +57,29 @@ class ChatSessionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ChatChoice(BaseModel):
-    """OpenAI-compatible chat choice."""
+# Removed duplicate models - use ChatCompletionChoice, ChatCompletionUsage, and ChatCompletionResponse instead
 
+
+class StreamingChunkDelta(BaseModel):
+    """Delta content in a streaming chunk."""
+    
+    role: Optional[str] = Field(None, description="Message role (only in first chunk)")
+    content: Optional[str] = Field(None, description="Incremental content")
+    
+    model_config = ConfigDict(extra="forbid")
+    
+    def __init__(self, content: Optional[str] = None, role: Optional[str] = None, **data):
+        """Initialize with flexible parameter order."""
+        super().__init__(role=role, content=content, **data)
+
+
+class StreamingChunkChoice(BaseModel):
+    """A single choice in a streaming chunk."""
+    
     index: int = Field(..., description="Choice index")
-    message: ChatMessageResponse = Field(..., description="Response message")
-    finish_reason: str = Field(..., description="Reason for completion finish")
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class ChatUsage(BaseModel):
-    """OpenAI-compatible usage statistics."""
-
-    prompt_tokens: int = Field(..., description="Number of prompt tokens")
-    completion_tokens: int = Field(..., description="Number of completion tokens")
-    total_tokens: int = Field(..., description="Total number of tokens")
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class ExecuteAgentResponse(BaseModel):
-    """HTTP response model for agent execution.
-
-    OpenAI-compatible chat completion response.
-    """
-
-    id: str = Field(..., description="Response identifier")
-    object: str = Field("chat.completion", description="Object type")
-    created: int = Field(..., description="Creation timestamp")
-    model: str = Field(..., description="Agent ID (model)")
-    choices: list[ChatChoice] = Field(..., description="Response choices")
-    usage: ChatUsage = Field(..., description="Token usage")
-
+    delta: StreamingChunkDelta = Field(..., description="Content delta")
+    finish_reason: Optional[str] = Field(None, description="Reason for completion finish")
+    
     model_config = ConfigDict(extra="forbid")
 
 
@@ -100,7 +90,8 @@ class StreamingChunk(BaseModel):
     object: str = Field("chat.completion.chunk", description="Object type")
     created: int = Field(..., description="Creation timestamp")
     model: str = Field(..., description="Agent ID (model)")
-    choices: list[dict[str, Any]] = Field(..., description="Streaming choices")
+    choices: list[StreamingChunkChoice] = Field(..., description="Streaming choices")
+    system_fingerprint: Optional[str] = Field(None, description="System fingerprint")
 
     model_config = ConfigDict(extra="forbid")
 
@@ -153,29 +144,11 @@ class ChatCompletionResponse(BaseModel):
     object: str = Field("chat.completion", description="Object type")
     created: int = Field(..., description="Creation timestamp")
     model: str = Field(..., description="Agent ID (model)")
-    choices: List[ChatCompletionChoice] = Field(..., description="Response choices")
+    choices: list[ChatCompletionChoice] = Field(..., description="Response choices")
     usage: ChatCompletionUsage = Field(..., description="Token usage")
     metadata: Optional[dict[str, Any]] = Field(None, description="Additional execution metadata")
     
     model_config = ConfigDict(extra="forbid")
 
 
-class ChatCompletionChunkChoice(BaseModel):
-    """A single choice in a streaming chat completion chunk."""
-
-    delta: ChatMessageResponse = Field(..., description="Delta message")
-    finish_reason: Optional[str] = Field(None, description="Reason for completion finish")
-    index: int = Field(..., description="Choice index")
-
-
-class ChatCompletionChunk(BaseModel):
-    """A chunk of a streaming chat completion response."""
-
-    id: str = Field(..., description="Response identifier")
-    object: str = Field("chat.completion.chunk", description="Object type")
-    created: int = Field(..., description="Creation timestamp")
-    model: str = Field(..., description="Agent ID (model)")
-    choices: List[ChatCompletionChunkChoice] = Field(..., description="Streaming choices")
-    system_fingerprint: str = Field(..., description="System fingerprint")
-
-    model_config = ConfigDict(extra="forbid")
+# ChatCompletionChunk removed - use StreamingChunk instead for OpenAI compatibility

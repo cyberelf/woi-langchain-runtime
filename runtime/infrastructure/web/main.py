@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import agent_routes, execution_routes
+from .routes import agent_routes, execution_routes, template_routes
 from .dependencies import startup_dependencies, shutdown_dependencies, get_architecture_info
 from ...auth import runtime_auth
 
@@ -69,6 +69,7 @@ def create_app() -> FastAPI:
     # Include routers
     app.include_router(agent_routes.router)
     app.include_router(execution_routes.router)
+    app.include_router(template_routes.router)
     
     @app.get("/")
     async def root():

@@ -4,14 +4,16 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
 from typing import Any, Optional
 
-from runtime.domain.services.llm import LLMService
-from runtime.domain.services.toolset import ToolsetService
+from pydantic import BaseModel, ValidationError
+
+# Services are now framework-specific, no domain abstractions needed
 from runtime.infrastructure.web.models.responses import (
-    ChatCompletionChunk,
     ChatCompletionResponse,
+    StreamingChunk,
 )
 from runtime.domain.value_objects.chat_message import ChatMessage
 from runtime.domain.value_objects.agent_configuration import AgentConfiguration
+from runtime.domain.value_objects.template import ConfigField, ConfigFieldValidation
 
 
 class BaseAgentTemplate(ABC):
@@ -28,19 +30,18 @@ class BaseAgentTemplate(ABC):
     template_description: str = "Base agent template"
     framework: str = "base"
 
+    # Placeholder for the configuration schema, should be overridden in subclasses
+    config_schema: type[BaseModel] = BaseModel
+
     def __init__(
         self, 
         configuration: AgentConfiguration, 
-        llm_service: LLMService, 
-        toolset_service: Optional[ToolsetService] = None,
         metadata: Optional[dict[str, Any]] = None,
     ) -> None:
         """Initialize agent instance with configuration and metadata.
         
         Args:
             configuration: AgentConfiguration value object containing all agent config
-            llm_service: LLM service instance
-            toolset_service: Optional toolset service instance
             metadata: Static metadata about the agent (id, name, template_id, etc.)
             
         """
@@ -57,25 +58,8 @@ class BaseAgentTemplate(ABC):
         
         # Get template configuration dict for backward compatibility
         self.template_config = configuration.get_template_configuration()
-        
-        # Services
-        self.llm_service = llm_service
-        self.toolset_service = toolset_service
-        
-        # Extract common config from AgentConfiguration
-        self.system_prompt = configuration.system_prompt or ""
-        self.llm_config_id = configuration.llm_config_id
-        
-        # Extract execution parameters from conversation_config
-        self.default_temperature = configuration.get_temperature()
-        self.default_max_tokens = configuration.get_max_tokens()
-        
-        # Extract conversation configuration
-        self.max_history = (configuration.get_conversation_config_value("historyLength") or 
-                           configuration.get_conversation_config_value("history_length"))
-        
-        # Extract toolset configuration (names only)
-        self.toolset_configs = configuration.get_toolset_names()
+
+        self.system_prompt = configuration.system_prompt
 
     @abstractmethod
     async def execute(
@@ -95,54 +79,64 @@ class BaseAgentTemplate(ABC):
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         metadata: Optional[dict[str, Any]] = None,
-    ) -> AsyncGenerator[ChatCompletionChunk, None]:
+    ) -> AsyncGenerator[StreamingChunk, None]:
         """Stream execute the agent. Must be implemented by subclasses."""
         pass
 
-    async def get_llm_client(
-        self, 
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None
-    ):
-        """Get LLM client configured with execution parameters.
+    @classmethod
+    def get_config_fields(cls) -> list[ConfigField]:
+        """Get the configuration fields for the template as domain objects."""
+        # Get the standard Pydantic JSON schema
+        pydantic_schema = cls.config_schema.model_json_schema()
         
-        This method merges template defaults with execution overrides and returns
-        an LLM client configured with the effective parameters.
+        # Convert to ConfigField domain objects
+        config_fields = []
+        properties = pydantic_schema.get("properties", {})
         
-        Args:
-            temperature: Override temperature (None to use template default)
-            max_tokens: Override max_tokens (None to use template default)
+        for field_key, field_info in properties.items():
+            # Extract field type
+            field_type = field_info.get("type", "string")
             
-        Returns:
-            LLM client configured with effective parameters
-        """
-        execution_params = {}
-        
-        # Use effective parameters (template defaults vs execution overrides)
-        effective_temperature = self.get_effective_temperature(temperature)
-        effective_max_tokens = self.get_effective_max_tokens(max_tokens)
-        
-        if effective_temperature is not None:
-            execution_params["temperature"] = effective_temperature
-        if effective_max_tokens is not None:
-            execution_params["max_tokens"] = effective_max_tokens
+            # Create validation object if needed
+            validation = None
+            validation_dict = {}
+            if "minLength" in field_info:
+                validation_dict["minLength"] = field_info["minLength"]
+            if "maxLength" in field_info:
+                validation_dict["maxLength"] = field_info["maxLength"]
+            if "minimum" in field_info:
+                validation_dict["min"] = field_info["minimum"]
+            if "maximum" in field_info:
+                validation_dict["max"] = field_info["maximum"]
+            if "pattern" in field_info:
+                validation_dict["pattern"] = field_info["pattern"]
+            if "enum" in field_info:
+                validation_dict["enum"] = field_info["enum"]
             
-        return await self.llm_service.get_client(
-            self.llm_config_id, 
-            **execution_params
-        )
+            if validation_dict:
+                validation = ConfigFieldValidation.from_dict(validation_dict)
+            
+            # Create ConfigField domain object
+            config_field = ConfigField(
+                key=field_key,
+                field_type=field_type,
+                description=field_info.get("description"),
+                default_value=field_info.get("default"),
+                validation=validation
+            )
+            
+            config_fields.append(config_field)
+        
+        return config_fields
 
-    async def get_toolset_client(self):
-        """Get toolset client for this agent."""
-        if self.toolset_service:
-            # Use extracted toolset configs
-            if not self.toolset_configs:
-                # Return None if no toolsets configured - agents can handle this gracefully
-                return None
-            return await self.toolset_service.create_client(self.toolset_configs)
-        else:
-            # Return None if toolset service not configured - allows agents to work without tools
-            return None
+    @classmethod
+    def validate_configuration(cls, configuration: dict[str, Any]) -> tuple[bool, Optional[ValidationError]]:
+        """Validate the configuration for the template."""
+        try:
+            cls.config_schema.model_validate(configuration)
+            return True, None
+        except ValidationError as e:
+            return False, e
 
     def get_config_value(self, key: str, default: Any = None) -> Any:
         """Get a configuration value from template_config.
@@ -161,35 +155,6 @@ class BaseAgentTemplate(ABC):
         # Then check AgentConfiguration's template_config
         return self.agent_configuration.get_template_config_value(key, default)
     
-    def get_effective_temperature(self, override_temperature: Optional[float] = None) -> Optional[float]:
-        """Get effective temperature, with execution override taking precedence.
-        
-        Args:
-            override_temperature: Temperature from execution call
-            
-        Returns:
-            Effective temperature to use
-        """
-        return override_temperature if override_temperature is not None else self.default_temperature
-    
-    def get_effective_max_tokens(self, override_max_tokens: Optional[int] = None) -> Optional[int]:
-        """Get effective max_tokens, with execution override taking precedence.
-        
-        Args:
-            override_max_tokens: Max tokens from execution call
-            
-        Returns:
-            Effective max_tokens to use
-        """
-        return override_max_tokens if override_max_tokens is not None else self.default_max_tokens
-    
-    def has_toolsets(self) -> bool:
-        """Check if any toolsets are configured."""
-        return len(self.toolset_configs) > 0
-    
-    def get_toolset_names(self) -> list[str]:
-        """Get list of configured toolset names."""
-        return self.toolset_configs.copy()
 
     def cleanup(self):
         """Clean up agent resources if needed."""

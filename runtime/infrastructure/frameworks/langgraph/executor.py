@@ -6,7 +6,12 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any, Optional
 
+from pydantic import ValidationError
+
+from .config import LangGraphFrameworkConfig
+from runtime.service_config import service_config as global_service_config
 from runtime.templates.base import BaseAgentTemplate
+from runtime.domain.value_objects.template import TemplateInfo
 
 from ..executor_base import (
     AgentExecutorInterface,
@@ -22,6 +27,7 @@ from runtime.infrastructure.frameworks.langgraph.llm.service import (
 from runtime.infrastructure.frameworks.langgraph.toolsets.service import (
     LangGraphToolsetService,
 )
+from runtime.domain.value_objects.agent_configuration import AgentConfiguration
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +35,12 @@ logger = logging.getLogger(__name__)
 class LangGraphAgentExecutor(AgentExecutorInterface):
     """Pure LangGraph agent executor - stateless execution only."""
     
-    def __init__(self, template_classes: dict, llm_service=None, toolset_service=None):
+    def __init__(
+        self, 
+        template_classes: dict[str, type[BaseAgentTemplate]], 
+        llm_service=None, 
+        toolset_service=None
+    ):
         self.template_classes = template_classes
         self._llm_service = llm_service
         self._toolset_service = toolset_service
@@ -67,7 +78,7 @@ class LangGraphAgentExecutor(AgentExecutorInterface):
             
             # Create temporary execution instance (not stored/managed)
             execution_instance = self._create_execution_instance(
-                template_class, template_id, template_version, configuration, metadata
+                template_class, template_id, template_version, configuration, metadata or {}
             )
             
             # Execute with the instance
@@ -97,21 +108,11 @@ class LangGraphAgentExecutor(AgentExecutorInterface):
             prompt_tokens = 0
             completion_tokens = 0
             
-            if hasattr(response, 'choices') and response.choices:
-                message = response.choices[0].message.content
-                finish_reason = getattr(response.choices[0], 'finish_reason', 'stop')
-            elif hasattr(response, 'content'):
-                message = response.content
-            elif isinstance(response, str):
-                message = response
+            message = response.choices[0].message.content
+            finish_reason = response.choices[0].finish_reason
             
-            if hasattr(response, 'usage'):
-                prompt_tokens = response.usage.prompt_tokens
-                completion_tokens = response.usage.completion_tokens
-            else:
-                # Estimate tokens
-                prompt_tokens = sum(len(msg.content.split()) for msg in messages)
-                completion_tokens = len(message.split())
+            prompt_tokens = response.usage.prompt_tokens
+            completion_tokens = response.usage.completion_tokens
             
             return ExecutionResult(
                 success=True,
@@ -166,92 +167,52 @@ class LangGraphAgentExecutor(AgentExecutorInterface):
             
             # Create temporary execution instance
             execution_instance = self._create_execution_instance(
-                template_class, template_id, template_version, configuration, metadata
+                template_class, template_id, template_version, configuration, metadata or {}
             )
             
-            # Check if template supports streaming
-            if hasattr(execution_instance, 'stream_execute'):
-                # Use configuration defaults if parameters are None
-                final_temperature = temperature
-                final_max_tokens = max_tokens
+            # Use configuration defaults if parameters are None
+            final_temperature = temperature
+            final_max_tokens = max_tokens
+            
+            # Fallback to configuration defaults if parameters not specified
+            if final_temperature is None:
+                final_temperature = configuration.get("temperature", 0.7)
+            if final_max_tokens is None:
+                final_max_tokens = configuration.get("max_tokens")
+            
+            chunk_index = 0
+            async for chunk in execution_instance.stream_execute(
+                messages=messages,
+                temperature=final_temperature,
+                max_tokens=final_max_tokens,
+                metadata=metadata or {}
+            ):
+                # Convert framework chunk to our format
+                content = ""
+                finish_reason = None
                 
-                # Fallback to configuration defaults if parameters not specified
-                if final_temperature is None:
-                    final_temperature = configuration.get("temperature", 0.7)
-                if final_max_tokens is None:
-                    final_max_tokens = configuration.get("max_tokens")
+                if hasattr(chunk, 'choices') and chunk.choices:
+                    delta = chunk.choices[0].delta
+                    content = getattr(delta, 'content', '')
+                    finish_reason = getattr(chunk.choices[0], 'finish_reason', None)
+                elif hasattr(chunk, 'content'):
+                    content = chunk.content
+                elif isinstance(chunk, str):
+                    content = chunk
                 
-                chunk_index = 0
-                async for chunk in execution_instance.stream_execute(
-                    messages=messages,
-                    temperature=final_temperature,
-                    max_tokens=final_max_tokens,
-                    metadata=metadata or {}
-                ):
-                    # Convert framework chunk to our format
-                    content = ""
-                    finish_reason = None
-                    
-                    if hasattr(chunk, 'choices') and chunk.choices:
-                        delta = chunk.choices[0].delta
-                        content = getattr(delta, 'content', '')
-                        finish_reason = getattr(chunk.choices[0], 'finish_reason', None)
-                    elif hasattr(chunk, 'content'):
-                        content = chunk.content
-                    elif isinstance(chunk, str):
-                        content = chunk
-                    
-                    yield StreamingChunk(
-                        content=content,
-                        chunk_index=chunk_index,
-                        finish_reason=finish_reason,
-                        metadata={
-                            'template_id': template_id,
-                            'framework': 'langgraph',
-                            **(metadata or {})
-                        }
-                    )
-                    
-                    chunk_index += 1
-            else:
-                # Fallback: simulate streaming from regular execution
-                result = await self.execute(
-                    template_id, template_version, configuration, messages,
-                    temperature, max_tokens, metadata
+                yield StreamingChunk(
+                    content=content,
+                    chunk_index=chunk_index,
+                    finish_reason=finish_reason,
+                    metadata={
+                        'template_id': template_id,
+                        'framework': 'langgraph',
+                        **(metadata or {})
+                    }
                 )
                 
-                if result.success and result.message:
-                    # Split message into chunks for simulation
-                    words = result.message.split()
-                    chunk_size = max(1, len(words) // 10)  # Approximately 10 chunks
-                    
-                    for i in range(0, len(words), chunk_size):
-                        chunk_words = words[i:i + chunk_size]
-                        content = ' '.join(chunk_words)
-                        if i > 0:
-                            content = ' ' + content  # Add space for continuation
-                        
-                        finish_reason = None
-                        if i + chunk_size >= len(words):
-                            finish_reason = "stop"
-                        
-                        yield StreamingChunk(
-                            content=content,
-                            chunk_index=i // chunk_size,
-                            finish_reason=finish_reason,
-                            metadata={
-                                'template_id': template_id,
-                                'framework': 'langgraph',
-                                'simulated_streaming': True,
-                                **(metadata or {})
-                            }
-                        )
-                else:
-                    yield StreamingChunk(
-                        content="",
-                        finish_reason="error",
-                        metadata={'error': result.error or 'Execution failed'}
-                    )
+                chunk_index += 1
+            
                     
         except Exception as e:
             logger.error(f"LangGraph streaming execution failed: {e}")
@@ -266,51 +227,36 @@ class LangGraphAgentExecutor(AgentExecutorInterface):
         template_id: str,
         template_version: str,
         configuration: dict
-    ) -> tuple[bool, list[str]]:
-        """Validate agent configuration for template."""
-        errors = []
-        
+    ) -> tuple[bool, Optional[ValidationError]]:
+        """Validate agent configuration for template."""        
         # Check template exists
         if template_id not in self.template_classes:
             available = list(self.template_classes.keys())
-            errors.append(f"Template '{template_id}' not found. Available: {available}")
-            return False, errors
+            raise ValueError(f"Template '{template_id}' not found. Available: {available}")
         
         template_class = self.template_classes[template_id]
         
-        # Template-specific validation
-        try:
-            # Try to create a validation instance
-            temp_instance = self._create_execution_instance(
-                template_class, template_id, template_version, configuration, {}
-            )
-            
-            # If template has validate method, use it
-            if hasattr(temp_instance, 'validate_configuration'):
-                valid, template_errors = temp_instance.validate_configuration(configuration)
-                if not valid:
-                    errors.extend(template_errors)
-            
-        except Exception as e:
-            errors.append(f"Configuration validation failed: {str(e)}")
-        
-        return len(errors) == 0, errors
+        return template_class.validate_configuration(configuration)
     
     def get_supported_templates(self) -> list[dict]:
         """Get list of supported templates."""
         templates = []
         
         for template_id, template_class in self.template_classes.items():
-            template_info = {
-                'template_id': template_id,
-                'template_name': getattr(template_class, 'name', template_id),
-                'description': getattr(template_class, 'description', ''),
-                'version': getattr(template_class, 'version', '1.0.0'),
-                'capabilities': getattr(template_class, 'capabilities', []),
-                'config_schema': getattr(template_class, 'config_schema', {}),
-                'framework': 'langgraph'
-            }
-            templates.append(template_info)
+            # Get the config fields as domain objects
+            config_fields = template_class.get_config_fields()
+            
+            # Create TemplateInfo using domain model
+            template_info = TemplateInfo.create_langgraph_template(
+                id=template_id,
+                name=template_class.template_name,
+                description=template_class.template_description,
+                version=template_class.template_version,
+                config_fields=config_fields
+            )
+            
+            # Convert to dictionary for backward compatibility with existing API contracts
+            templates.append(template_info.to_dict())
         
         return templates
     
@@ -320,7 +266,7 @@ class LangGraphAgentExecutor(AgentExecutorInterface):
         template_id: str,
         template_version: str,
         configuration: dict,
-        metadata: Optional[dict]
+        metadata: dict[str, Any]
     ) -> BaseAgentTemplate:
         """Create a temporary execution instance (not stored/managed)."""
         
@@ -336,7 +282,6 @@ class LangGraphAgentExecutor(AgentExecutorInterface):
         # Convert dict configuration back to AgentConfiguration for templates
         # The configuration dict comes from AgentConfiguration.get_template_configuration()
         # We need to reconstruct the AgentConfiguration from this dict
-        from runtime.domain.value_objects.agent_configuration import AgentConfiguration
         
         # Extract components from the merged configuration dict
         system_prompt = configuration.get("system_prompt")
@@ -389,15 +334,14 @@ class LangGraphFrameworkExecutor(FrameworkExecutor):
         self._agent_executor = None
         self._llm_service = None
         self._toolset_service = None
-        self._framework_config = None
+        self._framework_config: LangGraphFrameworkConfig
         
         # Validate and store configuration during initialization
         self._initialize_configuration(service_config)
     
     def _initialize_configuration(self, service_config):
         """Initialize and validate framework configuration."""
-        from .config import LangGraphFrameworkConfig
-        from runtime.service_config import service_config as global_service_config
+        
         
         try:
             # Get configuration data
@@ -440,7 +384,8 @@ class LangGraphFrameworkExecutor(FrameworkExecutor):
             self._template_classes = get_langgraph_template_classes()
         return self._template_classes
     
-    def create_agent_executor(self) -> AgentExecutorInterface:
+    @property
+    def agent_executor(self) -> AgentExecutorInterface:
         """Create framework-specific agent executor."""
         if self._agent_executor is None:
             self._agent_executor = LangGraphAgentExecutor(
@@ -452,10 +397,10 @@ class LangGraphFrameworkExecutor(FrameworkExecutor):
     
     def get_templates(self) -> list[dict]:
         """Get available templates from this framework."""
-        return self.create_agent_executor().get_supported_templates()
+        return self.agent_executor.get_supported_templates()
     
     def get_llm_service(self) -> Any:
-        """Get framework-specific LLM service with validated configuration."""
+        """Get framework-specific LLM service with validated configuration."""        
         if self._llm_service is None:
             try:
                 # Pass validated pydantic config class directly
@@ -506,13 +451,12 @@ class LangGraphFrameworkExecutor(FrameworkExecutor):
     async def shutdown(self) -> None:
         """Shutdown the framework executor."""
         # Clean up any resources
-        if self._llm_service and hasattr(self._llm_service, 'shutdown'):
+        if self._llm_service:
             await self._llm_service.shutdown()
         
-        if self._toolset_service and hasattr(self._toolset_service, 'shutdown'):
+        if self._toolset_service:
             await self._toolset_service.shutdown()
         
-        await super().shutdown()
         logger.info(f"Shutdown {self.name} executor")
     
     def get_health_status(self) -> dict:
@@ -525,3 +469,29 @@ class LangGraphFrameworkExecutor(FrameworkExecutor):
             "executor_initialized": self._agent_executor is not None
         })
         return status
+
+    # TemplateValidationInterface implementation
+    def validate_template_configuration(
+        self, 
+        template_id: str, 
+        configuration: dict
+    ) -> tuple[bool, Optional[ValidationError]]:
+        """Validate configuration for a specific template.
+        
+        Uses the template class's own validation method directly.
+        """
+        # Check template exists
+        if template_id not in self.template_classes:
+            # Let the calling code handle the ValueError for non-existent templates
+            available = list(self.template_classes.keys())
+            raise ValueError(f"Template '{template_id}' not found. Available: {available}")
+        
+        template_class = self.template_classes[template_id]
+        return template_class.validate_configuration(configuration)
+    
+    def template_exists(self, template_id: str) -> bool:
+        """Check if a template exists.
+        
+        Checks the loaded template classes.
+        """
+        return template_id in self.template_classes

@@ -3,8 +3,10 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, AsyncGenerator
 from datetime import datetime, UTC
+from pydantic import ValidationError
 
 from ...domain.value_objects.chat_message import ChatMessage
+from ...domain.services.template_validation_service import TemplateValidationInterface
 from ...core import BaseService
 
 
@@ -125,11 +127,14 @@ class AgentExecutorInterface(ABC):
         pass
 
 
-class FrameworkExecutor(BaseService, ABC):
+class FrameworkExecutor(BaseService, TemplateValidationInterface, ABC):
     """Abstract base class for pure framework executors.
     
     This replaces FrameworkIntegration with a purely stateless execution model.
     No instance management - just pure execution functions.
+    
+    Implements TemplateValidationInterface to provide template validation
+    capabilities directly from the executor that manages the templates.
     """
 
     @property
@@ -150,8 +155,9 @@ class FrameworkExecutor(BaseService, ABC):
         """Framework description."""
         pass
 
+    @property
     @abstractmethod
-    def create_agent_executor(self) -> AgentExecutorInterface:
+    def agent_executor(self) -> AgentExecutorInterface:
         """Create framework-specific agent executor.
         
         Returns:
@@ -192,6 +198,43 @@ class FrameworkExecutor(BaseService, ABC):
         
         Returns:
             List of capability names (e.g., 'streaming', 'tools', 'memory')
+        """
+        pass
+
+    @abstractmethod
+    async def shutdown(self) -> None:
+        """Shutdown the framework executor."""
+        pass
+
+    # TemplateValidationInterface implementation
+    @abstractmethod
+    def validate_template_configuration(
+        self, 
+        template_id: str, 
+        configuration: dict
+    ) -> tuple[bool, Optional[ValidationError]]:
+        """Validate configuration for a specific template.
+        
+        Args:
+            template_id: The template identifier
+            configuration: The configuration dictionary to validate
+            
+        Returns:
+            Tuple of (is_valid, validation_error)
+            - is_valid: True if configuration is valid
+            - validation_error: ValidationError if invalid, None if valid
+        """
+        pass
+    
+    @abstractmethod
+    def template_exists(self, template_id: str) -> bool:
+        """Check if a template exists.
+        
+        Args:
+            template_id: The template identifier to check
+            
+        Returns:
+            True if template exists, False otherwise
         """
         pass
 

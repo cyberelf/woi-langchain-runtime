@@ -23,12 +23,18 @@ from .models import (
     ChatChoice,
     ChatCompletionChoice,  # Alias
     ChatCompletionResponse,
-    ChatCompletionChunk,
     ChatUsage,
     MessageRole,
     TemplateInfo,
     RuntimeStatus,
     CreateAgentRequest,
+    # New OpenAI-compliant streaming models
+    StreamingChunk,
+    StreamingChunkChoice,
+    StreamingChunkDelta,
+    # Backward compatibility aliases
+    ChatCompletionChunk,
+    ChatCompletionChunkChoice,
 )
 
 __version__ = "1.0.0"
@@ -45,10 +51,16 @@ __all__ = [
     "ChatChoice",
     "ChatCompletionChoice",  # Alias
     "ChatCompletionResponse",
-    "ChatCompletionChunk",
     "ChatUsage",
     "MessageRole",
     "TemplateInfo",
     "RuntimeStatus",
     "CreateAgentRequest",
+    # New OpenAI-compliant streaming models
+    "StreamingChunk",
+    "StreamingChunkChoice",
+    "StreamingChunkDelta",
+    # Backward compatibility aliases
+    "ChatCompletionChunk",
+    "ChatCompletionChunkChoice",
 ]

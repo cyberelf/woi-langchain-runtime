@@ -6,7 +6,7 @@ This module provides utilities for LangGraph-based agent templates.
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from runtime.domain.services.llm import LLMService
+# Removed domain abstraction - using concrete implementation
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -43,14 +43,14 @@ class LLMConfiguration:
     model: str
     temperature: float = 0.7
     max_tokens: int = 100
-    metadata: dict[str, Any] = None
+    metadata: Optional[dict[str, Any]] = None
     
     def __post_init__(self):
         if self.metadata is None:
             self.metadata = {}
 
 
-class LangGraphLLMService(LLMService):
+class LangGraphLLMService:
     """LangGraph LLM Service"""
 
     def __init__(self, llm_config: Optional[LLMConfig]=None):
@@ -61,12 +61,16 @@ class LangGraphLLMService(LLMService):
         """
         if llm_config is None:
             # Create default configuration
-            self._llm_config = LLMConfig()
+            self._llm_config = LLMConfig(
+                providers={},
+                default_provider=None,
+                fallback_provider=None
+            )
         else:
             # Use pydantic config directly
             self._llm_config = llm_config
 
-    async def convert_llm_config_id(self, llm_config_id: str) -> LLMConfiguration:
+    def convert_llm_config_id(self, llm_config_id: Optional[str] = None) -> LLMConfiguration:
         """Convert LLM config ID to configuration using validated config.
         
         Uses the validated LLM configuration provided during initialization.
@@ -103,14 +107,14 @@ class LangGraphLLMService(LLMService):
             metadata={}
         )
 
-    async def get_client(self, llm_config_id: str, **execution_params):
+    def get_client(self, llm_config_id: Optional[str] = None, **execution_params):
         """Get the LangGraph LLM client with optional execution parameter overrides.
         
         Args:
             llm_config_id: Configuration ID to determine base client settings
             **execution_params: Optional overrides (temperature, max_tokens, etc.)
         """
-        llm_config = await self.convert_llm_config_id(llm_config_id)
+        llm_config = self.convert_llm_config_id(llm_config_id)
         
         # Override config with execution parameters
         final_temperature = execution_params.get("temperature", llm_config.temperature)
@@ -120,22 +124,22 @@ class LangGraphLLMService(LLMService):
             return ChatOpenAI(
                 model=llm_config.model,
                 temperature=final_temperature,
-                max_tokens=final_max_tokens,
-                **llm_config.metadata
+                max_completion_tokens=final_max_tokens,
+**(llm_config.metadata or {})
             )
         elif llm_config.provider == "google":
             return ChatGoogleGenerativeAI(
                 model=llm_config.model,
                 temperature=final_temperature,
                 max_tokens=final_max_tokens,
-                **llm_config.metadata
+**(llm_config.metadata or {})
             )
         elif llm_config.provider == "deepseek":
             return ChatDeepSeek(
                 model=llm_config.model,
                 temperature=final_temperature,
                 max_tokens=final_max_tokens,
-                **llm_config.metadata
+**(llm_config.metadata or {})
             )
         elif llm_config.provider == "test":
             # Mock LLM for testing - no API keys required
@@ -143,6 +147,10 @@ class LangGraphLLMService(LLMService):
         else:
             # Fallback to test provider for unknown providers
             return TestChatModel()
+
+    async def shutdown(self) -> None:
+        """Shutdown the LLM service."""
+        pass
 
 
 def get_langgraph_llm_service() -> LangGraphLLMService:

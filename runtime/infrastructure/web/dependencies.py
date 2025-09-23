@@ -12,6 +12,9 @@ from ..frameworks.langgraph.executor import LangGraphFrameworkExecutor
 from ...application.services.execute_agent_service import ExecuteAgentServiceV2, ExecuteAgentServiceAdapter
 from ...application.services.create_agent_service import CreateAgentService
 from ...application.services.query_agent_service import QueryAgentService
+from ...application.services.update_agent_service import UpdateAgentService
+from ...application.services.delete_agent_service import DeleteAgentService
+from ...application.services.update_agent_status_service import UpdateAgentStatusService
 from ..unit_of_work.in_memory_uow import TransactionalInMemoryUnitOfWork
 
 logger = logging.getLogger(__name__)
@@ -109,13 +112,34 @@ async def get_execute_agent_service() -> ExecuteAgentServiceV2:
 def get_create_agent_service() -> CreateAgentService:
     """Get create agent service dependency."""
     uow = get_unit_of_work()
-    return CreateAgentService(uow)
+    # Use the framework executor directly as the template validator
+    # since it now implements TemplateValidationInterface
+    framework_executor = get_framework_executor()
+    return CreateAgentService(uow, framework_executor)
 
 
 def get_query_agent_service() -> QueryAgentService:
     """Get query agent service dependency."""
     uow = get_unit_of_work()
     return QueryAgentService(uow)
+
+
+def get_update_agent_service() -> UpdateAgentService:
+    """Get update agent service dependency."""
+    uow = get_unit_of_work()
+    return UpdateAgentService(uow)
+
+
+def get_delete_agent_service() -> DeleteAgentService:
+    """Get delete agent service dependency."""
+    uow = get_unit_of_work()
+    return DeleteAgentService(uow)
+
+
+def get_update_agent_status_service() -> UpdateAgentStatusService:
+    """Get update agent status service dependency."""
+    uow = get_unit_of_work()
+    return UpdateAgentStatusService(uow)
 
 
 async def startup_dependencies():

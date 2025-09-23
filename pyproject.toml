@@ -85,6 +85,7 @@ reportUntypedClassDecorator = false
 reportUntypedNamedTuple = false
 reportPrivateUsage = false
 reportUnnecessaryIsInstance = false
+reportGeneralTypeIssues = false
 # Keep only important type errors
 reportInvalidTypeVarUsage = true
 reportSelfClsParameterName = true

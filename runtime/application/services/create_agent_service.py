@@ -4,6 +4,7 @@ import logging
 
 from ...domain.entities.agent import Agent
 from ...domain.services.agent_validation_service import AgentValidationService
+from ...domain.services.template_validation_service import TemplateValidationInterface
 from ...domain.unit_of_work.unit_of_work import UnitOfWorkInterface
 from ...domain.events.domain_events import AgentCreated
 from ..commands.create_agent_command import CreateAgentCommand
@@ -18,8 +19,9 @@ class CreateAgentService:
     and coordinates domain objects to fulfill the business requirement.
     """
     
-    def __init__(self, uow: UnitOfWorkInterface):
+    def __init__(self, uow: UnitOfWorkInterface, template_validator: TemplateValidationInterface):
         self.uow = uow
+        self.template_validator = template_validator
         self.validation_service = AgentValidationService()
         self._events: list[object] = []
     
@@ -33,7 +35,20 @@ class CreateAgentService:
         
         async with self.uow:
             try:
-                # 1. Create domain entity
+                # 1. Validate template exists
+                if not self.template_validator.template_exists(command.template_id):
+                    raise ValueError(f"Template '{command.template_id}' not found")
+                
+                # 2. Validate template configuration
+                config_dict = command.configuration.get_template_configuration()
+                is_valid, validation_error = self.template_validator.validate_template_configuration(
+                    command.template_id, 
+                    config_dict
+                )
+                if not is_valid:
+                    raise ValueError(f"Template configuration validation failed: {validation_error}")
+                
+                # 3. Create domain entity
                 agent = Agent.create(
                     name=command.name,
                     template_id=command.template_id,
@@ -43,20 +58,20 @@ class CreateAgentService:
                     agent_id=command.agent_id
                 )
                 
-                # 2. Validate business rules
+                # 4. Validate cross-cutting business rules
                 validation_errors = self.validation_service.validate_agent_configuration(agent)
                 if validation_errors:
                     raise ValueError(f"Agent validation failed: {', '.join(validation_errors)}")
                 
-                # 3. Check uniqueness constraint
+                # 5. Check uniqueness constraint
                 existing_agent = await self.uow.agents.get_by_name(command.name)
                 if existing_agent:
                     raise ValueError(f"Agent with name '{command.name}' already exists")
                 
-                # 4. Save to repository
+                # 6. Save to repository
                 await self.uow.agents.save(agent)
                 
-                # 5. Raise domain event
+                # 7. Raise domain event
                 event = AgentCreated.create(
                     agent_id=agent.id,
                     agent_name=agent.name,
@@ -64,7 +79,7 @@ class CreateAgentService:
                 )
                 self._events.append(event)
                 
-                # 6. Commit transaction
+                # 8. Commit transaction
                 await self.uow.commit()
                 
                 logger.info(f"Successfully created agent: {agent.id}")

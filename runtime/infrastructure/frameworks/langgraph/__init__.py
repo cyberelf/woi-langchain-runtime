@@ -16,7 +16,7 @@ for implementing other framework executors.
 
 from .executor import LangGraphFrameworkExecutor, LangGraphAgentExecutor
 from .config import LangGraphFrameworkConfig, LLMConfig, ToolsetsConfig
-from .templates import BaseLangGraphAgent, ConversationAgent, SimpleTestAgent
+from .templates import BaseLangGraphAgent, SimpleTestAgent, WorkflowAgent
 
 __all__ = [
     "LangGraphFrameworkExecutor",
@@ -25,6 +25,6 @@ __all__ = [
     "LLMConfig",
     "ToolsetsConfig",
     "BaseLangGraphAgent",
-    "ConversationAgent",
     "SimpleTestAgent",
+    "WorkflowAgent",
 ]

@@ -7,18 +7,20 @@ the runtime system.
 """
 
 import asyncio
-import sys
-from typing import Optional
+import dotenv
+import os
 
-from client_sdk import RuntimeClientContext
-from runtime.infrastructure.web.models.requests import CreateAgentRequest
+from client_sdk import RuntimeClientContext, CreateAgentRequest
 from runtime.domain.value_objects.chat_message import ChatMessage, MessageRole
 
+dotenv.load_dotenv()
 
 async def main():
     """Run the simple agent CLI example using the client SDK."""
-    
-    async with RuntimeClientContext() as client:
+    base_url = os.getenv("RUNTIME_BASE_URL", "http://localhost:8000/v1/")
+    api_key = os.getenv("RUNTIME_TOKEN")
+
+    async with RuntimeClientContext(base_url=base_url, api_key=api_key) as client:
         print("🚀 Simple Agent CLI Example (using Client SDK)")
         print("=" * 60)
         
@@ -26,7 +28,7 @@ async def main():
         print("\n📋 Available Templates:")
         templates = await client.list_templates()
         for template in templates:
-            print(f"  • {template.template_id} v{template.version} ({template.framework})")
+            print(f"  • {template.id} v{template.version} ({template.framework})")
             print(f"    {template.description}")
         
         print(f"\nFound {len(templates)} template(s)")
@@ -34,7 +36,7 @@ async def main():
         # Check if we have the simple-test template
         simple_template = None
         for template in templates:
-            if template.template_id == "simple-test":
+            if template.id == "simple-test":
                 simple_template = template
                 break
         
@@ -43,13 +45,13 @@ async def main():
             # Use the first available template as fallback
             if templates:
                 simple_template = templates[0]
-                print(f"   Using template: {simple_template.template_id}")
+                print(f"   Using template: {simple_template.id}")
             else:
                 print("❌ No templates available. Cannot proceed.")
                 return
         
         # Check existing agents
-        print(f"\n🤖 Existing Agents:")
+        print("\n🤖 Existing Agents:")
         agents = await client.list_agents()
         if agents:
             for agent in agents:
@@ -70,16 +72,17 @@ async def main():
             print(f"\n✅ Using existing agent: {existing_agent.name}")
             agent_info = existing_agent
         else:
-            print(f"\n🔧 Creating new agent...")
+            print("\n🔧 Creating new agent...")
             
             # Create agent configuration
             agent_data = CreateAgentRequest(
                 id=agent_id,
                 name="Simple Test CLI Agent",
                 description="A simple test agent for CLI demonstration",
-                type=simple_template.template_id,
-                template_id=simple_template.template_id,
-                template_version_id=simple_template.version,
+                avatar_url=None,
+                type=simple_template.id,
+                template_id=simple_template.id,
+                template_version_id=simple_template.version,  # Updated: removed template_version
                 template_config={
                     "response_prefix": "🤖 ",
                     "system_prompt": "You are a helpful assistant that responds to user questions."
@@ -88,22 +91,25 @@ async def main():
                 llm_config_id="deepseek",
                 toolsets=[],
                 conversation_config={},
-                agent_line_id=agent_id,  # Required field
-                owner_id="cli-example"  # Required field
+                agent_line_id=None,  # Will be auto-populated from id by validator
+                version_type="beta",
+                version_number="v1", 
+                owner_id="cli-example",  # Optional but provided
+                status="draft"
             )
             
             # Create agent using client SDK
             agent_info = await client.create_agent(agent_data)
             print(f"✅ Agent created: {agent_info.name}")
         
-        print(f"\n🎯 Agent Details:")
+        print("\n🎯 Agent Details:")
         print(f"   ID: {agent_info.agent_id}")
         print(f"   Name: {agent_info.name}")
         print(f"   Template: {agent_info.template_id} v{agent_info.template_version}")
         print(f"   Status: {agent_info.status}")
         
         # Interactive CLI loop
-        print(f"\n💬 Interactive Chat Session")
+        print("\n💬 Interactive Chat Session")
         print("Commands:")
         print("  'exit' - Exit the chat")
         print("  'stream' - Toggle streaming mode")
@@ -146,9 +152,12 @@ async def main():
                     # Stream response
                     print(f"{agent_name}: ", end="")
                     response_content = ""
-                    async for chunk in client.stream_chat_with_agent(agent_info.agent_id, conversation_history):
-                        if chunk.choices and chunk.choices[0].get("delta", {}).get("content"):
-                            content = chunk.choices[0]["delta"]["content"]
+                    stream = client.stream_chat_with_agent(
+                        agent_info.agent_id, conversation_history
+                    )
+                    async for chunk in stream:
+                        if chunk.choices and chunk.choices[0].delta.content:
+                            content = chunk.choices[0].delta.content
                             response_content += content
                             print(content, end="", flush=True)
                     print()  # New line after streaming
