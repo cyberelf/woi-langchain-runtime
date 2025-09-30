@@ -27,7 +27,6 @@ class ExecutionResult(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     context_updated: bool = False
     
-    # A2A-aligned identifiers
     message_id: Optional[str] = None  # Single atomic execution (A2A Message)
     task_id: Optional[str] = None     # Stateful conversation (A2A Task)
     agent_id: Optional[str] = None    # Agent that processed this
@@ -50,9 +49,10 @@ class StreamingChunk(BaseModel):
     finish_reason: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     
-    # A2A-aligned identifiers
-    message_id: Optional[str] = None  # The message this chunk belongs to
-    task_id: Optional[str] = None      # The task this chunk belongs to
+    message_id: Optional[str] = None  # The message this chunk belongs to  (A2A Message)
+    task_id: Optional[str] = None      # The task this chunk belongs to (A2A Task)
+    agent_id: Optional[str] = None     # Agent that produced this chunk
+    context_id: Optional[str] = None    # Broader grouping context
     
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

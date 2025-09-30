@@ -149,35 +149,28 @@ class ExecuteAgentService:
         total_content_length = 0
 
         try:
-            async for chunk_data in self.orchestrator.stream_message_results(message_id):
+            # The orchestrator now returns StreamingChunk domain models directly
+            async for chunk in self.orchestrator.stream_message_results(message_id):
                 chunk_count += 1
-                content = chunk_data.get('content', '')
-                finish_reason = chunk_data.get('finish_reason')
-                total_content_length += len(content)
+                total_content_length += len(chunk.content)
 
-                logger.debug(f"📦 Chunk #{chunk_count}: {len(content)} chars, "
-                           f"finish_reason: {finish_reason}")
+                logger.debug(f"📦 Chunk #{chunk_count}: {len(chunk.content)} chars, "
+                           f"finish_reason: {chunk.finish_reason}")
 
-                # Convert orchestrator chunk to core StreamingChunk
-                chunk = StreamingChunk(
-                    content=content,
-                    finish_reason=finish_reason,
-                    message_id=message_id,  # A2A Message ID
-                    task_id=task_id,        # A2A Task ID
-                    metadata={
-                        'agent_id': command.agent_id,
-                        'context_id': command.metadata.get('context_id') if command.metadata else None,
-                        'chunk_number': chunk_count,
-                        **(chunk_data.get('metadata', {}))
-                    }
-                )
+                # Add service-specific metadata to the domain model
+                chunk.metadata.update({
+                    'agent_id': command.agent_id,
+                    'context_id': command.metadata.get('context_id') if command.metadata else None,
+                    'chunk_number': chunk_count,
+                })
+
                 yield chunk
 
                 # Log completion when stream finishes
-                if finish_reason:
+                if chunk.finish_reason:
                     logger.info(f"✅ Streaming completed for {command.agent_id}: "
                               f"{chunk_count} chunks, {total_content_length} chars, ")
-                    logger.debug(f"🏁 Final chunk finish_reason: {finish_reason}")
+                    logger.debug(f"🏁 Final chunk finish_reason: {chunk.finish_reason}")
                     break
 
         except Exception as e:

@@ -18,13 +18,20 @@ from typing import Any, Optional
 from collections.abc import AsyncGenerator
 from concurrent.futures import ThreadPoolExecutor
 
-from .executors import AgentExecutorInterface, FrameworkExecutorInterface, ExecutionResult
+from .executors import AgentExecutorInterface, FrameworkExecutorInterface, ExecutionResult, StreamingChunk
 
-from .message_queue import MessageQueueInterface, QueueMessage, MessagePriority
+from .message_queue import MessageQueueInterface, QueueMessage as MessageQueueItem, MessagePriority
+from .queue_message_models import (
+    StreamingChunkQueueMessage,
+    ExecutionResultQueueMessage,
+    create_streaming_chunk_message,
+    create_execution_result_message,
+)
 from ..domain.entities.agent import Agent
 from ..domain.value_objects.agent_id import AgentId
 from ..domain.value_objects.chat_message import ChatMessage
 from ..domain.unit_of_work.unit_of_work import UnitOfWorkInterface
+from ..infrastructure.adapters.api_adapters import api_adapter_registry
 
 
 logger = logging.getLogger(__name__)
@@ -324,7 +331,12 @@ class AgentOrchestrator:
             
             if message and message.payload.get('message_id') == message_id:
                 await self.message_queue.acknowledge_message(message)
-                result = ExecutionResult.model_validate(message.payload)
+
+                # Parse the queue message as our internal format
+                queue_message = ExecutionResultQueueMessage.model_validate(message.payload)
+
+                # Convert internal queue message to domain model
+                result = api_adapter_registry.domain_adapter.execution_result_to_domain(queue_message)
                 self._message_results[message_id] = result
                 return result
             
@@ -332,7 +344,7 @@ class AgentOrchestrator:
         
         return None
     
-    async def stream_message_results(self, message_id: str) -> AsyncGenerator[dict[str, Any], None]:
+    async def stream_message_results(self, message_id: str) -> AsyncGenerator[StreamingChunk, None]:
         """Stream message execution results for streaming messages."""
         stream_queue = f"{self.STREAM_QUEUE_PREFIX}{message_id}"
 
@@ -349,14 +361,17 @@ class AgentOrchestrator:
                 if not message:
                     break
                 
-                chunk_data = message.payload
+                # Parse the queue message as our internal format
+                queue_message = StreamingChunkQueueMessage.model_validate(message.payload)
                 await self.message_queue.acknowledge_message(message)
-                
+
                 # Check for stream end marker
-                if chunk_data.get('stream_end', False):
+                if queue_message.metadata.get('stream_end', False):
                     break
-                
-                yield chunk_data
+
+                # Convert internal queue message to domain model
+                domain_chunk = api_adapter_registry.domain_adapter.streaming_chunk_to_domain(queue_message)
+                yield domain_chunk
         finally:
             # Cleanup stream queue
             await self.message_queue.delete_queue(stream_queue)
@@ -644,40 +659,59 @@ class AgentOrchestrator:
                 chunk_count += 1
                 content = getattr(chunk, 'content', '')
                 finish_reason = getattr(chunk, 'finish_reason', None)
+                original_chunk_index = getattr(chunk, 'chunk_index', chunk_count - 1)
                 total_content_length += len(content)
 
                 logger.debug(f"📦 Stream chunk #{chunk_count}: {len(content)} chars, "
                            f"finish: {finish_reason}")
-                
-                # Send chunk to stream queue
-                chunk_data = {
-                    "id": getattr(chunk, 'id', str(uuid.uuid4())),
-                    "object": "chat.completion.chunk",
-                    "created": int(datetime.now(UTC).timestamp()),
-                    "model": message_request.agent_id,
-                    "choices": [{
-                        "index": 0,
-                        "delta": {"content": content},
-                        "finish_reason": finish_reason
-                    }],
-                    "chunk_index": chunk_count,
-                    "message_id": message_request.message_id,
-                    "task_id": message_request.task_id
-                }
-                
+
+                # Send chunk to stream queue using internal queue message model
+                queue_message = create_streaming_chunk_message(
+                    message_id=message_request.message_id,
+                    task_id=message_request.task_id or "",
+                    agent_id=message_request.agent_id,
+                    content=content,
+                    chunk_index=original_chunk_index,
+                    finish_reason=finish_reason,
+                    context_id=message_request.context_id,
+                    metadata={
+                        "chunk_id": getattr(chunk, 'id', str(uuid.uuid4())),
+                        "user_id": message_request.user_id,
+                        "template_id": instance.agent.template_id,
+                        "template_version": instance.agent.template_version or "v1.0.0",
+                        **(message_request.metadata or {})
+                    }
+                )
+
                 await self.message_queue.send_message(
                     queue_name=stream_queue,
-                    payload=chunk_data,
+                    payload=queue_message.model_dump(),
                     priority=MessagePriority.HIGH
                 )
                 
             logger.debug(f"🏁 Stream execution completed: {chunk_count} chunks, "
                         f"{total_content_length} total chars")
             
-            # Send stream end marker
+            # Send stream end marker using internal queue message model
+            end_message = create_streaming_chunk_message(
+                message_id=message_request.message_id,
+                task_id=message_request.task_id or "",
+                agent_id=message_request.agent_id,
+                content="",
+                chunk_index=chunk_count + 1,
+                finish_reason="stop",
+                context_id=message_request.context_id,
+                metadata={
+                    "stream_end": True,
+                    "total_chunks": chunk_count,
+                    "user_id": message_request.user_id,
+                    **(message_request.metadata or {})
+                }
+            )
+
             await self.message_queue.send_message(
                 queue_name=stream_queue,
-                payload={"stream_end": True, "total_chunks": chunk_count},
+                payload=end_message.model_dump(),
                 priority=MessagePriority.HIGH
             )
             
@@ -720,13 +754,28 @@ class AgentOrchestrator:
                 context_id=message_request.context_id
             )
     
-    async def _send_message_result(self, original_message: QueueMessage, result: ExecutionResult) -> None:
+    async def _send_message_result(self, original_message: MessageQueueItem, result: ExecutionResult) -> None:
         """Send message result to reply queue."""
         reply_to = original_message.reply_to or self.RESULT_QUEUE
-        
+
+        # Convert ExecutionResult domain model to queue payload for sending
+        queue_payload = create_execution_result_message(
+            message_id=result.message_id or "",
+            task_id=result.task_id or "",
+            agent_id=result.agent_id or "",
+            success=result.success,
+            content=result.message or "",
+            error=result.error,
+            processing_time_ms=result.processing_time_ms,
+            prompt_tokens=result.prompt_tokens,
+            completion_tokens=result.completion_tokens,
+            context_id=result.context_id,
+            metadata=result.metadata
+        )
+
         await self.message_queue.send_message(
             queue_name=reply_to,
-            payload=result.model_dump(),
+            payload=queue_payload.model_dump(),
             correlation_id=original_message.correlation_id,
             metadata={
                 'original_message_id': original_message.payload.get('message_id'),
