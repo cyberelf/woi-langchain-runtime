@@ -1,10 +1,12 @@
 """Unit tests for ExecuteAgentService."""
 
+from openai import Stream
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from runtime.application.services.execute_agent_service import ExecuteAgentService
 from runtime.application.commands.execute_agent_command import ExecuteAgentCommand
+from runtime.core.executors.interfaces import StreamingChunk
 from runtime.domain.value_objects.chat_message import ChatMessage
 from runtime.core.executors import ExecutionResult
 from runtime.core.message_queue import MessagePriority
@@ -130,12 +132,20 @@ class TestExecuteAgentService:
         
         # Setup mocks for streaming
         mock_orchestrator.submit_message.return_value = "test-streaming-message-id"
+
+        def create_streaming_chunk(content, finish_reason=None):
+            return StreamingChunk(
+                content=content,
+                finish_reason=finish_reason,
+                chunk_index=0,
+                metadata={}
+            )
         
         # Create mock streaming chunk data (as dict, as returned by orchestrator)
         async def mock_stream_results(message_id: str):
-            yield {"content": "Hello", "finish_reason": None}
-            yield {"content": " world", "finish_reason": None}
-            yield {"content": "!", "finish_reason": "stop"}
+            yield create_streaming_chunk("Hello")
+            yield create_streaming_chunk(" world")
+            yield create_streaming_chunk("!", finish_reason="stop")
         
         mock_orchestrator.stream_message_results = mock_stream_results
         
