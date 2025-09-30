@@ -9,17 +9,17 @@ from typing import Any, Optional
 from pydantic import ValidationError
 
 from .config import LangGraphFrameworkConfig
-from runtime.service_config import service_config as global_service_config
-from runtime.templates.base import BaseAgentTemplate
+from runtime.service_config import get_services_config
+from .templates.base import BaseLangGraphAgent
 from runtime.domain.value_objects.template import TemplateInfo
 
-from ..executor_base import (
+from ....core.executors import (
     AgentExecutorInterface,
     ExecutionResult,
-    FrameworkExecutor,
     StreamingChunk,
 )
-from ....domain.value_objects.chat_message import ChatMessage
+from ..executor_base import FrameworkExecutor
+from ....core.types import ChatMessage
 from .templates import get_langgraph_template_classes
 from runtime.infrastructure.frameworks.langgraph.llm.service import (
     LangGraphLLMService,
@@ -37,7 +37,7 @@ class LangGraphAgentExecutor(AgentExecutorInterface):
     
     def __init__(
         self, 
-        template_classes: dict[str, type[BaseAgentTemplate]], 
+        template_classes: dict[str, type[BaseLangGraphAgent]], 
         llm_service=None, 
         toolset_service=None
     ):
@@ -92,42 +92,19 @@ class LangGraphAgentExecutor(AgentExecutorInterface):
             if final_max_tokens is None:
                 final_max_tokens = configuration.get("max_tokens")
                 
-            response = await execution_instance.execute(
+            # Execute and get ExecutionResult directly from template
+            result = await execution_instance.execute(
                 messages=messages,
                 temperature=final_temperature,
                 max_tokens=final_max_tokens,
-                metadata=metadata or {}
-            )
-            
-            # Convert response to standard format
-            processing_time = int((time.time() - start_time) * 1000)
-            
-            # Extract response data (framework-specific)
-            message = "No response"
-            finish_reason = "stop"
-            prompt_tokens = 0
-            completion_tokens = 0
-            
-            message = response.choices[0].message.content
-            finish_reason = response.choices[0].finish_reason
-            
-            prompt_tokens = response.usage.prompt_tokens
-            completion_tokens = response.usage.completion_tokens
-            
-            return ExecutionResult(
-                success=True,
-                message=message,
-                finish_reason=finish_reason,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                processing_time_ms=processing_time,
                 metadata={
                     'template_id': template_id,
                     'template_version': template_version,
-                    'framework': 'langgraph',
                     **(metadata or {})
                 }
             )
+            
+            return result
             
         except Exception as e:
             processing_time = int((time.time() - start_time) * 1000)
@@ -180,38 +157,18 @@ class LangGraphAgentExecutor(AgentExecutorInterface):
             if final_max_tokens is None:
                 final_max_tokens = configuration.get("max_tokens")
             
-            chunk_index = 0
+            # Stream execution - templates now return StreamingChunk directly
             async for chunk in execution_instance.stream_execute(
                 messages=messages,
                 temperature=final_temperature,
                 max_tokens=final_max_tokens,
-                metadata=metadata or {}
+                metadata={
+                    'template_id': template_id,
+                    'template_version': template_version,
+                    **(metadata or {})
+                }
             ):
-                # Convert framework chunk to our format
-                content = ""
-                finish_reason = None
-                
-                if hasattr(chunk, 'choices') and chunk.choices:
-                    delta = chunk.choices[0].delta
-                    content = getattr(delta, 'content', '')
-                    finish_reason = getattr(chunk.choices[0], 'finish_reason', None)
-                elif hasattr(chunk, 'content'):
-                    content = chunk.content
-                elif isinstance(chunk, str):
-                    content = chunk
-                
-                yield StreamingChunk(
-                    content=content,
-                    chunk_index=chunk_index,
-                    finish_reason=finish_reason,
-                    metadata={
-                        'template_id': template_id,
-                        'framework': 'langgraph',
-                        **(metadata or {})
-                    }
-                )
-                
-                chunk_index += 1
+                yield chunk
             
                     
         except Exception as e:
@@ -267,7 +224,7 @@ class LangGraphAgentExecutor(AgentExecutorInterface):
         template_version: str,
         configuration: dict,
         metadata: dict[str, Any]
-    ) -> BaseAgentTemplate:
+    ) -> BaseLangGraphAgent:
         """Create a temporary execution instance (not stored/managed)."""
         
         # Prepare static metadata for the template
@@ -348,10 +305,11 @@ class LangGraphFrameworkExecutor(FrameworkExecutor):
             if service_config:
                 config_data = service_config
             else:
-                # Use global service config
+                # Use global services config
+                services_config = get_services_config()
                 config_data = {
-                    "llm": global_service_config.get_llm_config(),
-                    "toolsets": {"toolsets": global_service_config.get_toolset_config()}
+                    "llm": services_config.get_llm_config(),
+                    "toolsets": services_config.get_toolsets_config()
                 }
             
             # Validate configuration using pydantic models

@@ -1,0 +1,38 @@
+{
+  "_info": {
+    "description": "Test Services Configuration - Minimal config for testing",
+    "version": "1.0.0",
+    "note": "Contains only test LLM provider for testing purposes"
+  },
+  "llm": {
+    "providers": {
+      "test": {
+        "type": "test",
+        "model": "test-model",
+        "temperature": 0.7,
+        "max_tokens": 1000
+      }
+    },
+    "default_provider": "test",
+    "fallback_provider": "test"
+  },
+  "toolsets": {
+    "toolsets": {},
+    "default_toolsets": []
+  },
+  "monitoring": {
+    "enable_metrics": false,
+    "metrics_endpoint": "/metrics",
+    "health_check_interval": 30,
+    "log_requests": false,
+    "trace_execution": false
+  },
+  "security": {
+    "enable_rate_limiting": false,
+    "requests_per_minute": 100,
+    "enable_input_validation": true,
+    "max_input_size": "1MB",
+    "allowed_file_types": [".txt", ".md", ".json", ".csv", ".py", ".js"],
+    "sandbox_execution": false
+  }
+}

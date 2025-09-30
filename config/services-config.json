@@ -1,0 +1,278 @@
+{
+  "_info": {
+    "description": "LangChain Agent Runtime Services Configuration",
+    "version": "2.0.0",
+    "note": "Agent templates are discovered automatically from code, not configured here. Available templates: 'simple-test', 'workflow'"
+  },
+  "llm": {
+    "providers": {
+      "openai-gpt4": {
+        "type": "openai",
+        "model": "gpt-4o",
+        "api_key": "${OPENAI_API_KEY}",
+        "base_url": "${OPENAI_BASE_URL}",
+        "temperature": 0.7,
+        "max_tokens": 4000
+      },
+      "openai-gpt4-turbo": {
+        "type": "openai",
+        "model": "gpt-4-turbo-preview",
+        "api_key": "${OPENAI_API_KEY}",
+        "base_url": "${OPENAI_BASE_URL}",
+        "temperature": 0.7,
+        "max_tokens": 4000
+      },
+      "openai-gpt35": {
+        "type": "openai",
+        "model": "gpt-3.5-turbo",
+        "api_key": "${OPENAI_API_KEY}",
+        "base_url": "${OPENAI_BASE_URL}",
+        "temperature": 0.7,
+        "max_tokens": 2000
+      },
+      "anthropic-claude": {
+        "type": "anthropic",
+        "model": "claude-3-5-sonnet-20241022",
+        "api_key": "${ANTHROPIC_API_KEY}",
+        "temperature": 0.7,
+        "max_tokens": 4000
+      },
+      "anthropic-claude-haiku": {
+        "type": "anthropic", 
+        "model": "claude-3-haiku-20240307",
+        "api_key": "${ANTHROPIC_API_KEY}",
+        "temperature": 0.7,
+        "max_tokens": 2000
+      },
+      "deepseek": {
+        "type": "deepseek",
+        "model": "deepseek-chat",
+        "api_key": "${DEEPSEEK_API_KEY}",
+        "base_url": "https://api.deepseek.com/v1",
+        "temperature": 0.3,
+        "max_tokens": 4000
+      },
+      "google-gemini": {
+        "type": "google",
+        "model": "gemini-1.5-pro",
+        "api_key": "${GOOGLE_API_KEY}",
+        "temperature": 0.7,
+        "max_tokens": 4000
+      },
+      "local-llama": {
+        "type": "openai",
+        "model": "llama3.1:8b",
+        "base_url": "${LOCAL_LLM_BASE_URL}",
+        "temperature": 0.7,
+        "max_tokens": 2000
+      },
+      "test-mock": {
+        "type": "test",
+        "model": "test-model",
+        "temperature": 0.7,
+        "max_tokens": 1000
+      }
+    },
+    "default_provider": "openai-gpt4",
+    "fallback_provider": "openai-gpt35"
+  },
+  "toolsets": {
+    "toolsets": {
+      "web-browsing": {
+        "type": "mcp",
+        "config": {
+          "servers": [
+            {
+              "name": "web-browser",
+              "command": "npx",
+              "args": ["@modelcontextprotocol/server-puppeteer"],
+              "env": {
+                "NODE_ENV": "production"
+              }
+            }
+          ],
+          "timeout": 30,
+          "description": "Web browsing and scraping capabilities",
+          "capabilities": ["browse_web", "extract_text", "take_screenshots"]
+        }
+      },
+      "filesystem": {
+        "type": "mcp",
+        "config": {
+          "servers": [
+            {
+              "name": "filesystem",
+              "command": "npx",
+              "args": ["@modelcontextprotocol/server-filesystem", "/safe/workspace"],
+              "env": {
+                "NODE_ENV": "production"
+              }
+            }
+          ],
+          "timeout": 15,
+          "description": "Safe filesystem operations within workspace",
+          "capabilities": ["read_file", "write_file", "list_directory", "create_directory"]
+        }
+      },
+      "database": {
+        "type": "mcp", 
+        "config": {
+          "servers": [
+            {
+              "name": "sqlite",
+              "command": "npx",
+              "args": ["@modelcontextprotocol/server-sqlite", "/data/database.db"],
+              "env": {
+                "NODE_ENV": "production"
+              }
+            }
+          ],
+          "timeout": 20,
+          "description": "SQLite database operations",
+          "capabilities": ["execute_query", "create_table", "insert_data", "update_data"]
+        }
+      },
+      "git-operations": {
+        "type": "mcp",
+        "config": {
+          "servers": [
+            {
+              "name": "git",
+              "command": "npx",
+              "args": ["@modelcontextprotocol/server-git", "/workspace"],
+              "env": {
+                "NODE_ENV": "production",
+                "GIT_AUTHOR_NAME": "Agent",
+                "GIT_AUTHOR_EMAIL": "agent@example.com"
+              }
+            }
+          ],
+          "timeout": 30,
+          "description": "Git version control operations",
+          "capabilities": ["commit", "branch", "status", "diff", "log"]
+        }
+      },
+      "email": {
+        "type": "mcp",
+        "config": {
+          "servers": [
+            {
+              "name": "email",
+              "command": "python",
+              "args": ["-m", "mcp_server_email"],
+              "env": {
+                "SMTP_HOST": "smtp.gmail.com",
+                "SMTP_PORT": "587",
+                "EMAIL_ADDRESS": "${EMAIL_ADDRESS}",
+                "EMAIL_PASSWORD": "${EMAIL_APP_PASSWORD}"
+              }
+            }
+          ],
+          "timeout": 25,
+          "description": "Email sending and management",
+          "capabilities": ["send_email", "read_inbox", "manage_drafts"]
+        }
+      },
+      "code-execution": {
+        "type": "mcp",
+        "config": {
+          "servers": [
+            {
+              "name": "python-executor",
+              "command": "python",
+              "args": ["-m", "mcp_server_python"],
+              "env": {
+                "PYTHON_SANDBOX": "true",
+                "MAX_EXECUTION_TIME": "30"
+              }
+            }
+          ],
+          "timeout": 35,
+          "description": "Safe Python code execution in sandbox",
+          "capabilities": ["execute_python", "install_packages", "create_plots"]
+        }
+      },
+      "api-integration": {
+        "type": "mcp",
+        "config": {
+          "servers": [
+            {
+              "name": "rest-api",
+              "command": "npx",
+              "args": ["@modelcontextprotocol/server-fetch"],
+              "env": {
+                "NODE_ENV": "production",
+                "MAX_REQUEST_SIZE": "10MB"
+              }
+            }
+          ],
+          "timeout": 20,
+          "description": "HTTP API requests and integrations",
+          "capabilities": ["http_get", "http_post", "http_put", "http_delete"]
+        }
+      },
+      "custom-business-tools": {
+        "type": "custom",
+        "config": {
+          "tools_directory": "./tools/business",
+          "auto_discovery": true,
+          "timeout": 30,
+          "description": "Custom business logic tools",
+          "allowed_modules": [
+            "crm_integration",
+            "inventory_management", 
+            "report_generator",
+            "notification_sender"
+          ],
+          "environment": {
+            "CRM_API_KEY": "${CRM_API_KEY}",
+            "INVENTORY_DB_URL": "${INVENTORY_DB_URL}",
+            "NOTIFICATION_WEBHOOK": "${NOTIFICATION_WEBHOOK}"
+          },
+          "capabilities": ["crm_lookup", "inventory_check", "generate_reports", "send_notifications"]
+        }
+      },
+      "data-analysis": {
+        "type": "custom",
+        "config": {
+          "tools_directory": "./tools/analysis",
+          "auto_discovery": true,
+          "timeout": 60,
+          "description": "Data analysis and visualization tools",
+          "allowed_modules": [
+            "pandas_operations",
+            "data_visualization",
+            "statistical_analysis",
+            "machine_learning"
+          ],
+          "environment": {
+            "DATA_PATH": "/data",
+            "OUTPUT_PATH": "/output",
+            "MAX_ROWS": "1000000"
+          },
+          "capabilities": ["data_cleaning", "create_charts", "statistical_tests", "ml_predictions"]
+        }
+      }
+    },
+    "default_toolsets": [
+      "filesystem",
+      "web-browsing",
+      "api-integration"
+    ]
+  },
+  "monitoring": {
+    "enable_metrics": true,
+    "metrics_endpoint": "/metrics",
+    "health_check_interval": 30,
+    "log_requests": true,
+    "trace_execution": false
+  },
+  "security": {
+    "enable_rate_limiting": true,
+    "requests_per_minute": 100,
+    "enable_input_validation": true,
+    "max_input_size": "1MB",
+    "allowed_file_types": [".txt", ".md", ".json", ".csv", ".py", ".js"],
+    "sandbox_execution": true
+  }
+}

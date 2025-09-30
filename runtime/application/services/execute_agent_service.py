@@ -1,16 +1,14 @@
-"""Execute Agent Service V2 - Using Task Manager and Message Queue Architecture."""
+"""Execute Agent Service - Clean application service using Task Manager."""
 
 import logging
 import uuid
-from typing import Dict, Any, Optional, AsyncGenerator
+from typing import Any
+from collections.abc import AsyncGenerator
 
-from ...domain.value_objects.chat_message import ChatMessage
-from ...domain.unit_of_work.unit_of_work import UnitOfWorkInterface
-from ...core.agent_task_manager import (
-    AgentTaskManager, 
-    AgentTaskRequest, 
-    AgentTaskResult, 
-    TaskStatus
+from ...core.executors import ExecutionResult, StreamingChunk
+from ...core.agent_orchestrator import (
+    AgentOrchestrator, 
+    AgentMessageRequest
 )
 from ...core.message_queue import MessagePriority
 from ..commands.execute_agent_command import ExecuteAgentCommand
@@ -18,220 +16,205 @@ from ..commands.execute_agent_command import ExecuteAgentCommand
 logger = logging.getLogger(__name__)
 
 
-class ExecuteAgentServiceV2:
-    """Execute agent application service using async task management.
+class ExecuteAgentService:
+    """Execute agent application service using async orchestration.
     
     This service orchestrates agent execution by:
-    1. Submitting tasks to the task manager
+    1. Submitting messages to the orchestrator (A2A Messages)
     2. Managing async execution via message queue
     3. Providing results and streaming capabilities
-    4. Delegating all instance management to AgentTaskManager
+    4. Delegating all instance management to AgentOrchestrator
+    5. Generating server-side task_ids for stateful conversations (A2A Tasks)
     """
     
-    def __init__(self, task_manager: AgentTaskManager):
-        self.task_manager = task_manager
+    def __init__(self, orchestrator: AgentOrchestrator):
+        self.orchestrator = orchestrator
     
-    async def execute(self, command: ExecuteAgentCommand) -> AgentTaskResult:
-        """Execute an agent asynchronously via task manager.
+    async def execute(self, command: ExecuteAgentCommand) -> ExecutionResult:
+        """Execute an agent and return core ExecutionResult.
         
         This method:
         1. Creates a task request from the command
         2. Submits to task manager for async execution
-        3. Waits for and returns the result
+        3. Waits for result and converts to core ExecutionResult
         4. All instance management is handled by task manager
         """
-        logger.info(f"Executing agent: {command.agent_id}")
+        logger.info(f"🚀 Executing agent: {command.agent_id}")
         
-        # Create task request
-        task_request = AgentTaskRequest.create_execute_task(
+        # Generate server-side task_id if this is a stateful conversation
+        # The command may already have a task_id from a previous message in the same conversation
+        task_id = command.session_id or str(uuid.uuid4())  # For now, map session_id to task_id
+        logger.debug(f"🆔 Task ID assigned: {task_id} (session: {command.session_id})")
+        
+        # Create message request (A2A Message)
+        correlation_id = str(uuid.uuid4())
+        message_request = AgentMessageRequest.create_execute_message(
             agent_id=command.agent_id,
             messages=command.messages,
-            session_id=command.session_id,
+            task_id=task_id,  # Stateful conversation ID
+            context_id=command.metadata.get('context_id') if command.metadata else None,
             user_id=command.user_id,
-            stream=command.stream,
-            temperature=command.temperature,
+            stream=False,  # Non-streaming execution
+            temperature=command.temperature or 0.7,
             max_tokens=command.max_tokens,
             metadata=command.metadata,
             priority=MessagePriority.NORMAL,
-            correlation_id=str(uuid.uuid4())
+            correlation_id=correlation_id
         )
         
-        # Submit task for async execution
-        task_id = await self.task_manager.submit_task(task_request)
-        logger.debug(f"Submitted task {task_id} for agent {command.agent_id}")
+        logger.debug(f"📝 Created message request - correlation: {correlation_id}, "
+                    f"priority: {MessagePriority.NORMAL.value}, streaming: False")
+        
+        # Submit message for async execution
+        message_id = await self.orchestrator.submit_message(message_request)
+        logger.debug(f"Submitted message {message_id} for agent {command.agent_id} in task {task_id}")
         
         # Wait for result (with timeout)
         timeout_seconds = getattr(command, 'timeout_seconds', 300)  # 5 minutes default
-        result = await self.task_manager.get_task_result(task_id, timeout_seconds)
+        logger.debug(f"⏳ Waiting for result with {timeout_seconds}s timeout...")
         
-        if not result:
-            logger.error(f"Task {task_id} timed out after {timeout_seconds} seconds")
-            # Create timeout result
-            result = AgentTaskResult(
+        execution_result = await self.orchestrator.get_message_result(message_id, timeout_seconds)
+        
+        if not execution_result:
+            logger.error(f"Message {message_id} timed out after {timeout_seconds} seconds")
+            return ExecutionResult(
+                success=False,
+                error=f"Message timed out after {timeout_seconds} seconds",
+                processing_time_ms=timeout_seconds * 1000,
+                message_id=message_id,
                 task_id=task_id,
-                agent_id=command.agent_id,
-                status=TaskStatus.TIMEOUT,
-                error=f"Task timed out after {timeout_seconds} seconds",
-                processing_time_ms=timeout_seconds * 1000
+                agent_id=command.agent_id
             )
         
-        logger.info(f"Agent execution completed: {command.agent_id}, status: {result.status.value}")
-        return result
+        logger.debug(f"📥 Received result for message {message_id} "
+                    f"processing time: {execution_result.processing_time_ms}ms)")
+        
+        # ExecutionResult is now returned directly from message manager
+        # Ensure it has the proper identifiers
+        if not execution_result.task_id:
+            execution_result.task_id = task_id
+        if not execution_result.agent_id:
+            execution_result.agent_id = command.agent_id
+        if not execution_result.message_id:
+            execution_result.message_id = message_id
+        
+        if execution_result.success:
+            logger.info(f"✅ Agent execution completed: {command.agent_id}, "
+                       f"tokens: {execution_result.total_tokens}, "
+                       f"time: {execution_result.processing_time_ms}ms")
+            logger.debug(f"📊 Result details - {execution_result}")
+        else:
+            logger.error(f"❌ Agent execution failed: {command.agent_id}, "
+                        f"error: {execution_result.error}",
+                        f"details: {execution_result}")
+        
+        return execution_result
     
-    async def execute_streaming(self, command: ExecuteAgentCommand) -> AsyncGenerator[Dict[str, Any], None]:
-        """Execute an agent with streaming response via task manager."""
+    async def execute_streaming(self, command: ExecuteAgentCommand) -> AsyncGenerator[StreamingChunk, None]:
+        """Execute an agent with streaming response, returning core StreamingChunk objects."""
         logger.info(f"Streaming execution for agent: {command.agent_id}")
         
-        # Create streaming task request
-        task_request = AgentTaskRequest.create_execute_task(
+        # Generate server-side task_id for stateful conversation  
+        task_id = command.session_id or str(uuid.uuid4())
+        logger.debug(f"🆔 Streaming task ID assigned: {task_id} (session: {command.session_id})")
+        
+        # Create streaming message request (A2A Message)
+        correlation_id = str(uuid.uuid4())
+        message_request = AgentMessageRequest.create_execute_message(
             agent_id=command.agent_id,
             messages=command.messages,
-            session_id=command.session_id,
+            task_id=task_id,  # Stateful conversation ID
+            context_id=command.metadata.get('context_id') if command.metadata else None,
             user_id=command.user_id,
             stream=True,  # Force streaming
-            temperature=command.temperature,
+            temperature=command.temperature or 0.7,
             max_tokens=command.max_tokens,
             metadata=command.metadata,
             priority=MessagePriority.HIGH,  # Higher priority for streaming
-            correlation_id=str(uuid.uuid4())
+            correlation_id=correlation_id
         )
         
-        # Submit streaming task
-        task_id = await self.task_manager.submit_task(task_request)
-        logger.debug(f"Submitted streaming task {task_id} for agent {command.agent_id}")
+        logger.debug(f"📝 Created streaming message request - correlation: {correlation_id}, "
+                    f"priority: {MessagePriority.HIGH.value}, streaming: True")
         
-        # Stream results
+        # Submit streaming message
+        message_id = await self.orchestrator.submit_message(message_request)
+        logger.debug(
+            f"Submitted streaming message {message_id} for agent {command.agent_id} in task {task_id}"
+        )
+        
+        # Stream results - return core StreamingChunk objects only
+        logger.debug(f"📺 Starting stream consumption for message {message_id}")
+        chunk_count = 0
+        total_content_length = 0
+
         try:
-            async for chunk_data in self.task_manager.stream_task_results(task_id):
-                # Convert internal chunk format to OpenAI-compatible format
-                openai_chunk = {
-                    "id": chunk_data.get('id', str(uuid.uuid4())),
-                    "object": "chat.completion.chunk",
-                    "created": chunk_data.get('created', 0),
-                    "model": command.agent_id,
-                    "choices": chunk_data.get('choices', [{
-                        "index": 0,
-                        "delta": {"content": chunk_data.get('content', '')},
-                        "finish_reason": chunk_data.get('finish_reason')
-                    }])
-                }
-                
-                # Add usage info if available
-                if 'usage' in chunk_data:
-                    openai_chunk['usage'] = chunk_data['usage']
-                
-                yield openai_chunk
-                
+            async for chunk_data in self.orchestrator.stream_message_results(message_id):
+                chunk_count += 1
+                content = chunk_data.get('content', '')
+                finish_reason = chunk_data.get('finish_reason')
+                total_content_length += len(content)
+
+                logger.debug(f"📦 Chunk #{chunk_count}: {len(content)} chars, "
+                           f"finish_reason: {finish_reason}")
+
+                # Convert orchestrator chunk to core StreamingChunk
+                chunk = StreamingChunk(
+                    content=content,
+                    finish_reason=finish_reason,
+                    message_id=message_id,  # A2A Message ID
+                    task_id=task_id,        # A2A Task ID
+                    metadata={
+                        'agent_id': command.agent_id,
+                        'context_id': command.metadata.get('context_id') if command.metadata else None,
+                        'chunk_number': chunk_count,
+                        **(chunk_data.get('metadata', {}))
+                    }
+                )
+                yield chunk
+
+                # Log completion when stream finishes
+                if finish_reason:
+                    logger.info(f"✅ Streaming completed for {command.agent_id}: "
+                              f"{chunk_count} chunks, {total_content_length} chars, ")
+                    logger.debug(f"🏁 Final chunk finish_reason: {finish_reason}")
+                    break
+
         except Exception as e:
-            logger.error(f"Streaming execution failed: {e}")
-            # Yield error chunk
-            yield {
-                "id": str(uuid.uuid4()),
-                "object": "chat.completion.chunk",
-                "created": 0,
-                "model": command.agent_id,
-                "choices": [{
-                    "index": 0,
-                    "delta": {},
-                    "finish_reason": "error"
-                }],
-                "error": str(e)
-            }
+            logger.error(f"❌ Streaming execution failed for {command.agent_id} after "
+                        f"{chunk_count} chunks: {e}")
+            # Yield error chunk as core type
+            yield StreamingChunk(
+                content="",
+                finish_reason="error",
+                message_id=message_id,  # A2A Message ID
+                task_id=task_id,        # A2A Task ID
+                metadata={
+                    'agent_id': command.agent_id,
+                    'error': str(e),
+                    'chunks_received': chunk_count
+                }
+            )
     
-    async def get_agent_instances(self) -> list[Dict[str, Any]]:
+    async def get_agent_instances(self) -> list[dict[str, Any]]:
         """Get list of managed agent instances."""
-        return await self.task_manager.list_agent_instances()
+        return await self.orchestrator.list_agent_instances()
     
-    async def destroy_session_agent(self, agent_id: str, session_id: str) -> bool:
-        """Destroy a session agent."""
-        return await self.task_manager.destroy_agent_instance(agent_id, session_id)
+    async def destroy_task_agent(self, agent_id: str, task_id: str) -> bool:
+        """Destroy a task agent (A2A Task context)."""
+        return await self.orchestrator.destroy_agent_instance(agent_id, task_id)
     
-    async def cleanup_inactive_sessions(self) -> None:
-        """Clean up inactive session agents."""
-        # This is now handled automatically by task manager's cleanup worker
-        logger.info("Session cleanup is handled automatically by task manager")
+    async def cleanup_inactive_tasks(self) -> None:
+        """Clean up inactive task agents."""
+        # This is now handled automatically by orchestrator's cleanup worker
+        logger.info("Task cleanup is handled automatically by orchestrator")
     
-    async def get_task_manager_health(self) -> Dict[str, Any]:
-        """Get task manager health status."""
+    async def get_orchestrator_health(self) -> dict[str, Any]:
+        """Get orchestrator health status."""
         return {
-            "task_manager_running": self.task_manager._running,
-            "worker_count": len(self.task_manager._task_workers),
-            "active_instances": len(self.task_manager._agent_instances),
-            "running_tasks": len(self.task_manager._running_tasks),
-            "message_queue_type": type(self.task_manager.message_queue).__name__
+            "orchestrator_running": self.orchestrator._running,
+            "worker_count": len(self.orchestrator._message_workers),
+            "active_instances": len(self.orchestrator._agent_instances),
+            "running_messages": len(self.orchestrator._running_messages),
+            "message_queue_type": type(self.orchestrator.message_queue).__name__
         }
-
-
-# Adapter class for backward compatibility
-class AgentExecutionResult:
-    """Backward compatibility adapter for AgentTaskResult."""
-    
-    def __init__(self, task_result: AgentTaskResult):
-        self._task_result = task_result
-        
-        # Map task result to old format
-        self.response_id = task_result.task_id
-        self.agent_id = task_result.agent_id
-        self.message = task_result.message or ""
-        self.finish_reason = task_result.finish_reason or "stop"
-        self.prompt_tokens = task_result.prompt_tokens
-        self.completion_tokens = task_result.completion_tokens
-        self.total_tokens = task_result.total_tokens
-        self.processing_time_ms = task_result.processing_time_ms
-        self.metadata = task_result.metadata
-        self.created_at = int(task_result.created_at.timestamp())
-        
-        # Handle status mapping
-        if task_result.status == TaskStatus.COMPLETED:
-            self.success = True
-            self.error = None
-        else:
-            self.success = False
-            self.error = task_result.error or f"Task failed with status: {task_result.status.value}"
-
-
-class ExecuteAgentServiceAdapter:
-    """Adapter to maintain backward compatibility with existing API.
-    
-    This adapter wraps ExecuteAgentServiceV2 to provide the same interface
-    as the original ExecuteAgentService while using the new task management system.
-    """
-    
-    def __init__(self, task_manager: AgentTaskManager):
-        self._service = ExecuteAgentServiceV2(task_manager)
-    
-    async def execute(self, command: ExecuteAgentCommand) -> AgentExecutionResult:
-        """Execute agent and return result in old format."""
-        task_result = await self._service.execute(command)
-        return AgentExecutionResult(task_result)
-    
-    async def _execute_streaming_real(
-        self, 
-        agent_instance, 
-        messages: list[ChatMessage], 
-        command: ExecuteAgentCommand, 
-        start_time: float
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Streaming execution using new task manager (backward compatibility)."""
-        async for chunk in self._service.execute_streaming(command):
-            yield chunk
-    
-    async def _execute_streaming_mock(
-        self, 
-        agent, 
-        command: ExecuteAgentCommand, 
-        start_time: float
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Mock streaming (replaced by real streaming via task manager)."""
-        async for chunk in self._service.execute_streaming(command):
-            yield chunk
-    
-    # Delegate other methods
-    async def get_agent_instances(self) -> list[Dict[str, Any]]:
-        return await self._service.get_agent_instances()
-    
-    async def destroy_session_agent(self, agent_id: str, session_id: str) -> bool:
-        return await self._service.destroy_session_agent(agent_id, session_id)
-    
-    async def cleanup_inactive_sessions(self) -> None:
-        await self._service.cleanup_inactive_sessions()

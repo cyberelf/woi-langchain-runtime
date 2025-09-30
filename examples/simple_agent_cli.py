@@ -10,8 +10,7 @@ import asyncio
 import dotenv
 import os
 
-from client_sdk import RuntimeClientContext, CreateAgentRequest
-from runtime.domain.value_objects.chat_message import ChatMessage, MessageRole
+from client_sdk import RuntimeClientContext, CreateAgentRequest, ChatMessage, MessageRole
 
 dotenv.load_dotenv()
 

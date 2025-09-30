@@ -88,7 +88,7 @@ class CreateAgentService:
             except Exception as e:
                 logger.error(f"Failed to create agent: {e}")
                 await self.uow.rollback()
-                raise
+                raise e
     
     def get_events(self) -> list[object]:
         """Get domain events raised during execution."""

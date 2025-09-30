@@ -1,7 +1,7 @@
 """LangGraph Base Agent Template - Framework-specific base class."""
 
+import logging
 import time
-import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
 from typing import Any, Optional, TypeVar
@@ -10,45 +10,74 @@ from datetime import datetime, UTC
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.graph.state import CompiledStateGraph
 
-from runtime.infrastructure.web.models.responses import (
-    ChatCompletionChoice,
-    ChatCompletionResponse,
-    ChatCompletionUsage,
-    ChatMessageResponse,
-    StreamingChunk,
-    StreamingChunkChoice,
-    StreamingChunkDelta,
-)
+from runtime.core.executors import ExecutionResult, StreamingChunk
 from runtime.domain.value_objects.chat_message import ChatMessage, MessageRole
-from runtime.templates.base import BaseAgentTemplate
 from runtime.infrastructure.frameworks.langgraph.llm.service import LangGraphLLMService
 from runtime.infrastructure.frameworks.langgraph.toolsets.service import LangGraphToolsetService
 from runtime.domain.value_objects.agent_configuration import AgentConfiguration
+from runtime.domain.value_objects.template import ConfigField, ConfigFieldValidation
+
+from pydantic import BaseModel, ValidationError
+
+logger = logging.getLogger(__name__)
 
 # Type variable for state management
 StateType = TypeVar('StateType')
 
 
-class BaseLangGraphAgent(BaseAgentTemplate, ABC):
+class BaseLangGraphAgent(ABC):
     """
     Base class for LangGraph agent templates.
 
     Provides common functionality for LangGraph-based agents including:
+    - Template metadata and configuration handling
     - Message conversion utilities
     - State creation interface
     - Common execution patterns
     - LLM client integration
     """
 
-    def __init__(
-                    self, 
-                    configuration: AgentConfiguration, 
-                    llm_service: LangGraphLLMService, 
-                    toolset_service: Optional[LangGraphToolsetService] = None, 
-                    metadata: Optional[dict[str, Any]] = None
-                ):
-        super().__init__(configuration, metadata)
+    # Template Metadata (should be overridden in subclasses)
+    template_name: str = "Base LangGraph Agent Template"
+    template_id: str = "base-langgraph-agent"
+    template_version: str = "1.0.0"
+    template_description: str = "Base LangGraph agent template"
+    framework: str = "langgraph"
 
+    # Placeholder for the configuration schema, should be overridden in subclasses
+    config_schema: type[BaseModel] = BaseModel
+
+    def __init__(
+        self, 
+        configuration: AgentConfiguration, 
+        llm_service: LangGraphLLMService, 
+        toolset_service: Optional[LangGraphToolsetService] = None, 
+        metadata: Optional[dict[str, Any]] = None
+    ):
+        """Initialize LangGraph agent instance with configuration and metadata.
+        
+        Args:
+            configuration: AgentConfiguration value object containing all agent config
+            llm_service: LangGraph LLM service for this agent
+            toolset_service: Optional LangGraph toolset service
+            metadata: Static metadata about the agent (id, name, template_id, etc.)
+        """
+        metadata = metadata or {}
+        
+        # Initialize identity and template fields from metadata (from BaseAgentTemplate)
+        self.id = metadata.get("agent_id", "unknown")
+        self.name = metadata.get("agent_name", "Unknown Agent")
+        self.template_id = metadata.get("template_id", self.template_id)
+        self.template_version = metadata.get("template_version", self.template_version)
+        
+        # Store the configuration value object
+        self.agent_configuration = configuration
+        
+        # Get template configuration dict for backward compatibility
+        self.template_config = configuration.get_template_configuration()
+        self.system_prompt = configuration.system_prompt
+
+        # LangGraph-specific initialization
         self.llm_service = llm_service
         self.toolset_service = toolset_service
 
@@ -113,22 +142,19 @@ class BaseLangGraphAgent(BaseAgentTemplate, ABC):
     async def _process_stream_chunk(
         self, 
         chunk: Any, 
-        completion_id: str, 
-        start_time: float
+        chunk_index: int = 0
     ) -> AsyncGenerator[StreamingChunk, None]:
         """Process a streaming chunk from LangGraph execution.
         
         Args:
             chunk: Raw chunk from LangGraph streaming
-            completion_id: Unique completion ID for this execution
-            start_time: Start time of the execution
+            chunk_index: Index of this chunk in the sequence
         Yields:
             StreamingChunk objects for intermediate streaming responses
         """
         pass
 
-    @property
-    async def graph(self) -> CompiledStateGraph:
+    async def get_graph(self) -> CompiledStateGraph:
         """Get the LangGraph execution graph."""
         if not hasattr(self, '_graph') or self._graph is None:
             self._graph = await self._build_graph()
@@ -183,37 +209,22 @@ class BaseLangGraphAgent(BaseAgentTemplate, ABC):
             metadata={}
         )
 
-
-    def _create_chat_message_response(
-        self, content: str, metadata: Optional[dict[str, Any]] = None
-    ) -> ChatMessageResponse:
-        """Create a standardized ChatMessageResponse."""
-        return ChatMessageResponse(
-            role=MessageRole.ASSISTANT,
-            content=content,
-            timestamp=datetime.now(UTC),
-            metadata=metadata or {}
-        )
-
-
-    def _get_system_fingerprint(self) -> str:
-        """Get system fingerprint for this agent type."""
-        return f"fp_{getattr(self, 'template_id', 'agent')}"
-
     async def execute(
         self,
         messages: list[ChatMessage],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         metadata: Optional[dict[str, Any]] = None,
-    ) -> ChatCompletionResponse:
+    ) -> ExecutionResult:
         """Standard execute implementation for LangGraph agents."""
+        logger.debug(f"🎯 LangGraph execute: {self.template_id} with {len(messages)} messages")
+        logger.debug(f"🔧 Execution params - temp: {temperature}, max_tokens: {max_tokens}")
+        
         start_time = time.time()
-        completion_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
         
         try:
             # Get the compiled graph
-            graph = await self.graph
+            graph = await self.get_graph()
             
             # Create the initial state using template-specific method
             initial_state = self._create_initial_state(messages)
@@ -224,31 +235,33 @@ class BaseLangGraphAgent(BaseAgentTemplate, ABC):
             # Extract content using template-specific method
             content = await self._extract_final_content(final_state)
             
-            # Create response message
-            response_message = self._create_chat_message_response(content, metadata)
+            processing_time = int((time.time() - start_time) * 1000)
             
-            return ChatCompletionResponse(
-                id=completion_id,
-                object="chat.completion",
-                created=int(start_time),
-                model=getattr(self, 'id', 'unknown'),
-                choices=[
-                    ChatCompletionChoice(
-                        index=0,
-                        message=response_message,
-                        finish_reason="stop",
-                    ),
-                ],
-                usage=ChatCompletionUsage(
-                    prompt_tokens=0,  # Simplified for now
-                    completion_tokens=0,
-                    total_tokens=0,
-                ),
-                metadata=metadata,
+            logger.info(f"✅ LangGraph execution completed: {self.template_id} in {processing_time}ms")
+            
+            return ExecutionResult(
+                success=True,
+                message=content,
+                finish_reason="stop",
+                prompt_tokens=0,  # Simplified for now - could be enhanced
+                completion_tokens=0,  # Simplified for now - could be enhanced  
+                processing_time_ms=processing_time,
+                metadata={
+                    'template_id': self.template_id,
+                    'framework': 'langgraph',
+                    **(metadata or {})
+                }
             )
             
         except Exception as e:
-            raise RuntimeError(f"Agent execution failed: {e}")
+            processing_time = int((time.time() - start_time) * 1000)
+            logger.error(f"❌ LangGraph execution failed: {self.template_id} after {processing_time}ms: {e}")
+            return ExecutionResult(
+                success=False,
+                error=str(e),
+                processing_time_ms=processing_time,
+                metadata={'template_id': self.template_id, 'framework': 'langgraph'}
+            )
 
     async def stream_execute(
         self,
@@ -258,53 +271,150 @@ class BaseLangGraphAgent(BaseAgentTemplate, ABC):
         metadata: Optional[dict[str, Any]] = None,
     ) -> AsyncGenerator[StreamingChunk, None]:
         """Standard stream execute implementation for LangGraph agents."""
-        start_time = time.time()
-        completion_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+        logger.debug(f"🌊 LangGraph stream execute: {self.template_id} with {len(messages)} messages")
+        logger.debug(f"🔧 Stream params - temp: {temperature}, max_tokens: {max_tokens}")
         
         try:
             # Get the compiled graph
-            graph = await self.graph
+            graph = await self.get_graph()
             
             # Create the initial state using template-specific method
             initial_state = self._create_initial_state(messages)
             
             # Stream the graph execution
+            chunk_index = 0
+            total_content_length = 0
+            
             async for chunk in graph.astream(initial_state, stream_mode="values"):
+                logger.debug(f"📦 Processing stream chunk #{chunk_index}")
+                logger.debug(f"📦 Chunk data #{chunk}")
+                
                 # Let subclasses handle chunk processing for streaming
                 # This is template-specific since state structures differ
-                chunk_generator = self._process_stream_chunk(chunk, completion_id, start_time)
+                chunk_generator = self._process_stream_chunk(chunk, chunk_index)
+                chunk_content_length = 0
+                
                 async for completion_chunk in chunk_generator:
+                    content_len = len(getattr(completion_chunk, 'content', ''))
+                    chunk_content_length += content_len
+                    total_content_length += content_len
+                    
+                    logger.debug(f"📝 Processed stream chunk #{chunk_index}: {content_len} chars")
+                    logger.debug(f"📝 Processed stream chunk data #{completion_chunk}")
                     yield completion_chunk
+                
+                logger.debug(f"✅ Chunk #{chunk_index} completed: {chunk_content_length} chars")
+                chunk_index += 1
             
-            # Final chunk with finish reason
+            logger.info(f"🏁 LangGraph streaming completed: {self.template_id}, "
+                       f"{chunk_index} chunks, {total_content_length} total chars")
+            
+            # Final chunk with finish reason  
             yield StreamingChunk(
-                id=completion_id,
-                object="chat.completion.chunk",
-                created=int(start_time),
-                model=getattr(self, 'id', 'unknown'),
-                system_fingerprint=self._get_system_fingerprint(),
-                choices=[
-                    StreamingChunkChoice(
-                        index=0,
-                        delta=StreamingChunkDelta(content=""),
-                        finish_reason="stop",
-                    ),
-                ],
+                content="",
+                finish_reason="stop",
+                metadata={
+                    'template_id': self.template_id,
+                    'framework': 'langgraph',
+                    'total_chunks': chunk_index,
+                    'total_content_length': total_content_length,
+                    **(metadata or {})
+                }
             )
             
         except Exception as e:
+            logger.error(f"❌ LangGraph streaming failed: {self.template_id}: {e}")
             # Yield error chunk
             yield StreamingChunk(
-                id=completion_id,
-                object="chat.completion.chunk",
-                created=int(start_time),
-                model=getattr(self, 'id', 'unknown'),
-                system_fingerprint=self._get_system_fingerprint(),
-                choices=[
-                    StreamingChunkChoice(
-                        index=0,
-                        delta=StreamingChunkDelta(content=f"Error: {e}"),
-                        finish_reason="error",
-                    ),
-                ],
+                content="",
+                finish_reason="error",
+                metadata={
+                    'error': str(e),
+                    'template_id': self.template_id,
+                    'framework': 'langgraph'
+                }
             )
+
+    @classmethod
+    def get_config_fields(cls) -> list[ConfigField]:
+        """Get the configuration fields for the template as domain objects."""
+        # Get the standard Pydantic JSON schema
+        pydantic_schema = cls.config_schema.model_json_schema()
+        
+        # Convert to ConfigField domain objects
+        config_fields = []
+        properties = pydantic_schema.get("properties", {})
+        
+        for field_key, field_info in properties.items():
+            # Extract field type
+            field_type = field_info.get("type", "string")
+            
+            # Create validation object if needed
+            validation = None
+            validation_dict = {}
+            if "minLength" in field_info:
+                validation_dict["minLength"] = field_info["minLength"]
+            if "maxLength" in field_info:
+                validation_dict["maxLength"] = field_info["maxLength"]
+            if "minimum" in field_info:
+                validation_dict["min"] = field_info["minimum"]
+            if "maximum" in field_info:
+                validation_dict["max"] = field_info["maximum"]
+            if "pattern" in field_info:
+                validation_dict["pattern"] = field_info["pattern"]
+            if "enum" in field_info:
+                validation_dict["enum"] = field_info["enum"]
+            
+            if validation_dict:
+                validation = ConfigFieldValidation.from_dict(validation_dict)
+            
+            # Create ConfigField domain object
+            config_field = ConfigField(
+                key=field_key,
+                field_type=field_type,
+                description=field_info.get("description"),
+                default_value=field_info.get("default"),
+                validation=validation
+            )
+            
+            config_fields.append(config_field)
+        
+        return config_fields
+
+    @classmethod
+    def validate_configuration(cls, configuration: dict[str, Any]) -> tuple[bool, Optional[ValidationError]]:
+        """Validate the configuration for the template."""
+        try:
+            cls.config_schema.model_validate(configuration)
+            return True, None
+        except ValidationError as e:
+            return False, e
+
+    def get_config_value(self, key: str, default: Any = None) -> Any:
+        """Get a configuration value from template_config.
+        
+        Args:
+            key: Configuration key to retrieve
+            default: Default value if key not found
+            
+        Returns:
+            Configuration value or default
+        """
+        # Check template_config first for backward compatibility
+        if key in self.template_config:
+            return self.template_config[key]
+        
+        # Then check AgentConfiguration's template_config
+        return self.agent_configuration.get_template_config_value(key, default)
+    
+    def cleanup(self):
+        """Clean up agent resources if needed."""
+        pass
+
+    def __str__(self) -> str:
+        """String representation of the agent."""
+        return f"{self.template_name} ({self.id})"
+
+    def __repr__(self) -> str:
+        """Developer representation of the agent."""
+        return f"BaseLangGraphAgent(id='{self.id}', template_id='{self.template_id}')"

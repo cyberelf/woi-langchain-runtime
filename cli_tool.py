@@ -512,12 +512,6 @@ def main():
     chat.callback = async_cmd(chat.callback)
     health.callback = async_cmd(health.callback)
     
-    # Handle environment
-    if not os.getenv("OPENAI_API_KEY"):
-        click.echo("⚠️  Warning: OPENAI_API_KEY environment variable not set.", err=True)
-        click.echo("   Set it with: export OPENAI_API_KEY='your-api-key-here'", err=True)
-        click.echo()
-    
     # Run CLI
     cli()
 

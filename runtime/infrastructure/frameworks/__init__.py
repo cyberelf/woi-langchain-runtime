@@ -8,7 +8,7 @@ Available framework executors:
 - LangGraph: Complete reference implementation
 """
 
-from .executor_base import FrameworkExecutor, AgentExecutorInterface
+from .executor_base import FrameworkExecutor
 
 # Lazy import to avoid circular dependencies
 def _get_langgraph_executor():
@@ -49,7 +49,6 @@ def get_framework(name: str):
 
 __all__ = [
     "FrameworkExecutor",
-    "AgentExecutorInterface", 
     "get_framework_executor",
     "list_framework_executors",
     "AVAILABLE_EXECUTORS",

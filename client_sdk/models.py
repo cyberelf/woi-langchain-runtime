@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from typing import Optional
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 from enum import Enum
 
 
@@ -19,6 +19,7 @@ class ChatMessage(BaseModel):
     """A single message in a chat conversation."""
     role: MessageRole
     content: str
+    
 
 
 # API Request Models
@@ -76,16 +77,29 @@ class TemplateInfo:
     config: list[dict]
 
 
-@dataclass
-class AgentInfo:
-    """Information about an existing agent."""
-    agent_id: str
-    name: str
-    description: str
-    template_id: str
-    template_version: str
-    status: str
-    created_at: str
+class AgentInfo(BaseModel):
+    """Information about an existing agent - matches server AgentResponse structure."""
+    id: str = Field(..., description="Agent identifier")
+    name: str = Field(..., description="Agent name")
+    template_id: str = Field(..., description="Template identifier")
+    template_version: Optional[str] = Field(None, description="Template version")
+    status: str = Field(..., description="Agent status")
+    configuration: dict = Field(..., description="Agent configuration")
+    created_at: str = Field(..., description="Creation timestamp (ISO format)")
+    updated_at: str = Field(..., description="Last update timestamp (ISO format)")
+    metadata: dict = Field(..., description="Agent metadata")
+
+    @property
+    def agent_id(self) -> str:
+        """Backward compatibility property for agent_id."""
+        return self.id
+
+    @property 
+    def description(self) -> Optional[str]:
+        """Extract description from metadata for backward compatibility."""
+        return self.metadata.get("description")
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class ChatChoice(BaseModel):
@@ -114,6 +128,7 @@ class ChatCompletionResponse(BaseModel):
     object: str = "chat.completion"
     system_fingerprint: Optional[str] = None
     usage: ChatUsage
+    metadata: Optional[dict] = Field(None, description="Additional execution metadata")
 
 
 class StreamingChunkDelta(BaseModel):

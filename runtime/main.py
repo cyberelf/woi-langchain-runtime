@@ -18,15 +18,18 @@ import logging
 import uvicorn
 
 from runtime.infrastructure.web.main import create_app
-from runtime.config import settings
+from runtime.settings import settings
 
-# Configure logging
+# Configure logging - debug setting controls log level
+effective_level = settings.effective_log_level
 logging.basicConfig(
-    level=getattr(logging, settings.log_level),
+    level=getattr(logging, effective_level),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    force=True  # Override any existing logging configuration
 )
 
 logger = logging.getLogger(__name__)
+logger.info(f"🔧 Logging configured: debug={settings.debug}, level={effective_level}")
 
 # Create the DDD-compliant FastAPI app
 app = create_app()
@@ -45,7 +48,7 @@ def main():
         host=settings.host,
         port=settings.port,
         reload=settings.debug,
-        log_level=settings.log_level.lower(),
+        log_level=settings.effective_log_level.lower(),
     )
 
 if __name__ == "__main__":

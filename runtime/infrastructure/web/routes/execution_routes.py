@@ -3,20 +3,23 @@
 import logging
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.responses import StreamingResponse
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from ....application.commands.execute_agent_command import ExecuteAgentCommand
-from ....application.services.execute_agent_service import ExecuteAgentServiceAdapter
+from ....application.services.execute_agent_service import ExecuteAgentService
+from ....core.executors import ExecutionResult
 from ..models.requests import ChatCompletionRequest
 from ..models.responses import (
     ChatCompletionResponse, 
     ChatCompletionChoice, 
     ChatCompletionUsage,
     ChatMessageResponse,
-    StreamingChunk
+    StreamingChunk,
+    StreamingChunkChoice,
+    StreamingChunkDelta
 )
 from ..dependencies import get_execute_agent_service
-from ....auth import runtime_auth
+from ..auth import runtime_auth
 from ....domain.value_objects.chat_message import MessageRole, ChatMessage
 from datetime import datetime, UTC
 
@@ -25,12 +28,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/chat", tags=["execution"])
 
 
-@router.post("/completions", response_model=ChatCompletionResponse)
+@router.post(
+    "/completions",
+    response_model=ChatCompletionResponse,
+    responses={
+        200: {
+            "description": "Chat completion response",
+            "model": ChatCompletionResponse,
+        },
+        "200.streaming": {
+            "description": "Server-sent events stream for real-time completion",
+            "content": {"text/event-stream": {"example": "data: {...}\n\n"}},
+        }
+    }
+)
 async def chat_completions(
     request: ChatCompletionRequest,
-    service: ExecuteAgentServiceAdapter = Depends(get_execute_agent_service),
+    service: ExecuteAgentService = Depends(get_execute_agent_service),
     _: bool = Depends(runtime_auth)
-) -> ChatCompletionResponse:
+):
     """Execute agent using OpenAI-compatible chat completions format.
     
     This endpoint provides OpenAI-compatible agent execution, allowing
@@ -69,18 +85,34 @@ async def chat_completions(
         )
         
         # Handle streaming vs non-streaming
+        logger.debug(f"🎯 Request routing - stream: {request.stream}, agent: {request.model}")
+        
         if request.stream:
-            # Return streaming response using new task manager
+            logger.info(f"🌊 Routing to streaming execution for agent: {request.model}")
+            # Return streaming response with correct SSE format
             return StreamingResponse(
                 _stream_chat_completion(service, command),
-                media_type="text/plain"
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"  # Disable nginx buffering
+                }
             )
         else:
-            # Execute agent and get result via task manager
-            result = await service.execute(command)
+            logger.info(f"⚡ Routing to synchronous execution for agent: {request.model}")
+            # Execute agent and get ExecutionResult
+            execution_result = await service.execute(command)
             
-            # Convert result to OpenAI-compatible response
-            return _convert_to_chat_completion_response(result)
+            logger.debug(f"📊 Execution completed - success: {execution_result.success}, "
+                        f"tokens: {execution_result.total_tokens}, "
+                        f"time: {execution_result.processing_time_ms}ms")
+            
+            # Convert core ExecutionResult to OpenAI-compatible response
+            response = _convert_execution_result_to_chat_completion(execution_result, request.model)
+            
+            # FastAPI will automatically validate this against ChatCompletionResponse
+            return response
         
     except ValueError as e:
         logger.warning(f"Agent execution validation failed: {e}")
@@ -96,6 +128,7 @@ async def chat_completions(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
+        
     except Exception as e:
         logger.error(f"Failed to execute agent: {e}")
         
@@ -113,70 +146,141 @@ async def chat_completions(
 
 
 async def _stream_chat_completion(
-    service: ExecuteAgentServiceAdapter, 
+    service: ExecuteAgentService, 
     command: ExecuteAgentCommand
 ) -> AsyncGenerator[str, None]:
-    """Stream chat completion chunks in OpenAI format using new task manager."""
+    """Stream chat completion chunks in OpenAI SSE format."""
+    import time
+    import uuid
+    
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+    created_timestamp = int(time.time())
+    
+    logger.info(f"🌊 Starting SSE stream for agent {command.agent_id} "
+               f"(completion_id: {completion_id})")
+    logger.debug(f"🔍 Stream request details - messages: {len(command.messages)}, "
+                f"session: {command.session_id}")
+    
+    chunk_count = 0
+    total_content_length = 0
+    stream_start = time.time()
+    
     try:
-        # Use the new async task management streaming
-        async for chunk in service._execute_streaming_real(None, command.messages, command, 0):
-            # Format as Server-Sent Events
-            chunk_data = StreamingChunk(**chunk)
-            yield f"data: {chunk_data.model_dump_json()}\n\n"
+        # Stream core chunks from application service
+        logger.debug("📺 Starting core chunk consumption from service")
+        async for core_chunk in service.execute_streaming(command):
+            chunk_count += 1
+            content = core_chunk.content or ""
+            total_content_length += len(content)
+            
+            logger.debug(f"📦 SSE chunk #{chunk_count}: {len(content)} chars, "
+                        f"finish_reason: {core_chunk.finish_reason}")
+            
+            # Convert core StreamingChunk to OpenAI web format
+            openai_chunk = StreamingChunk(
+                id=completion_id,
+                object="chat.completion.chunk",
+                created=created_timestamp,
+                model=command.agent_id,
+                system_fingerprint="",
+                choices=[StreamingChunkChoice(
+                    index=0,
+                    delta=StreamingChunkDelta(content=content),
+                    finish_reason=core_chunk.finish_reason
+                )]
+            )
+            
+            # Format as Server-Sent Event
+            sse_data = f"data: {openai_chunk.model_dump_json()}\n\n"
+            logger.debug(f"📤 SSE data size: {len(sse_data)} bytes")
+            yield sse_data
+            
+            # Log completion when stream finishes
+            if core_chunk.finish_reason:
+                stream_time = (time.time() - stream_start) * 1000
+                logger.info(f"✅ SSE stream completed for {command.agent_id}: "
+                           f"{chunk_count} chunks, {total_content_length} chars, "
+                           f"{stream_time:.2f}ms total")
+                break
         
         # Send final [DONE] message
+        logger.debug("🏁 Sending [DONE] marker")
         yield "data: [DONE]\n\n"
         
     except Exception as e:
-        logger.error(f"Streaming execution failed: {e}")
+        stream_time = (time.time() - stream_start) * 1000
+        logger.error(f"❌ SSE streaming failed for {command.agent_id} after "
+                    f"{chunk_count} chunks, {stream_time:.2f}ms: {e}")
+        
         # Send error chunk
-        error_chunk = {
-            "id": "error",
-            "object": "chat.completion.chunk",
-            "created": int(command.metadata.get("created", 0)) if command.metadata else 0,
-            "model": command.agent_id,
-            "choices": [{
-                "index": 0,
-                "delta": {"content": f"Error: {str(e)}"},
-                "finish_reason": "error"
-            }]
-        }
-        yield f"data: {StreamingChunk(**error_chunk).model_dump_json()}\n\n"
+        error_chunk = StreamingChunk(
+            id=completion_id,
+            object="chat.completion.chunk",
+            created=created_timestamp,
+            model=command.agent_id,
+            system_fingerprint="",
+            choices=[StreamingChunkChoice(
+                index=0,
+                delta=StreamingChunkDelta(content=f"Error: {str(e)}"),
+                finish_reason="error"
+            )]
+        )
+        yield f"data: {error_chunk.model_dump_json()}\n\n"
         yield "data: [DONE]\n\n"
 
 
-def _convert_to_chat_completion_response(result) -> ChatCompletionResponse:
-    """Convert execution result to OpenAI-compatible response."""
+def _convert_execution_result_to_chat_completion(
+    execution_result: ExecutionResult, 
+    model_id: str
+) -> ChatCompletionResponse:
+    """Convert core ExecutionResult to OpenAI-compatible ChatCompletionResponse."""
+    import time
+    import uuid
     
-    # Create the response message
-    message = ChatMessageResponse(
-        role=MessageRole.ASSISTANT,
-        content=result.message,
-        timestamp=datetime.fromtimestamp(result.created_at, UTC),
-        metadata=result.metadata
-    )
-    
-    # Create the choice
-    choice = ChatCompletionChoice(
-        index=0,
-        message=message,
-        finish_reason=result.finish_reason
-    )
+    # Handle failed execution
+    if not execution_result.success:
+        error_message = execution_result.error or "Execution failed"
+        message = ChatMessageResponse(
+            role=MessageRole.ASSISTANT,
+            content=f"Error: {error_message}",
+            timestamp=datetime.now(UTC),
+            metadata=execution_result.metadata or {}
+        )
+        
+        choice = ChatCompletionChoice(
+            index=0,
+            message=message,
+            finish_reason="error"
+        )
+    else:
+        # Successful execution
+        message = ChatMessageResponse(
+            role=MessageRole.ASSISTANT,
+            content=execution_result.message or "",
+            timestamp=datetime.now(UTC),
+            metadata=execution_result.metadata or {}
+        )
+        
+        choice = ChatCompletionChoice(
+            index=0,
+            message=message,
+            finish_reason=execution_result.finish_reason or "stop"
+        )
     
     # Create usage statistics
     usage = ChatCompletionUsage(
-        prompt_tokens=result.prompt_tokens,
-        completion_tokens=result.completion_tokens,
-        total_tokens=result.total_tokens
+        prompt_tokens=execution_result.prompt_tokens or 0,
+        completion_tokens=execution_result.completion_tokens or 0,
+        total_tokens=(execution_result.prompt_tokens or 0) + (execution_result.completion_tokens or 0)
     )
     
     # Create the complete response
     return ChatCompletionResponse(
-        id=result.response_id,
+        id=f"chatcmpl-{uuid.uuid4().hex[:8]}",
         object="chat.completion",
-        created=result.created_at,
-        model=result.agent_id,
+        created=int(time.time()),
+        model=model_id,
         choices=[choice],
         usage=usage,
-        metadata=result.metadata
+        metadata=execution_result.metadata
     )

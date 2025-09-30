@@ -11,14 +11,14 @@ class AgentIdentityModel(BaseModel):
     
     id: str = Field(..., description="Unique identifier for the agent.")
     name: str = Field(..., description="A human-readable name for the agent.")
-    description: Optional[str] = Field(None, description="A brief description of the agent's purpose.")
-    avatar_url: Optional[str] = Field(None, description="URL for the agent's avatar.")
-    type: Optional[str] = Field(None, description="Agent type")
-    owner_id: Optional[str] = Field(None, description="Owner ID")
-    status: Optional[str] = Field("draft", description="Agent status")
-    agent_line_id: Optional[str] = Field(None, description="Agent line ID")
-    version_type: Optional[str] = Field("beta", description="Version type (beta or release)")
-    version_number: Optional[str] = Field("v1", description="Version number")
+    description: Optional[str] = Field(default=None, description="A brief description of the agent's purpose.")
+    avatar_url: Optional[str] = Field(default=None, description="URL for the agent's avatar.")
+    type: Optional[str] = Field(default=None, description="Agent type")
+    owner_id: Optional[str] = Field(default=None, description="Owner ID")
+    status: str = Field(default="draft", description="Agent status")
+    agent_line_id: Optional[str] = Field(default=None, description="Agent line ID")
+    version_type: str = Field(default="beta", description="Version type (beta or release)")
+    version_number: str = Field(default="v1", description="Version number")
     
     model_config = ConfigDict(extra="forbid")
 
@@ -27,7 +27,7 @@ class AgentTemplateModel(BaseModel):
     """Model for agent template selection."""
     
     template_id: str = Field(..., description="The ID of the template to use for this agent.")
-    template_version_id: Optional[str] = Field(None, description="Template version ID (alias)")
+    template_version_id: Optional[str] = Field(default=None, description="Template version ID (alias)")
     
     model_config = ConfigDict(extra="forbid")
 
@@ -38,11 +38,11 @@ class AgentTemplateModel(BaseModel):
 class AgentConfigurationModel(BaseModel):
     """Model for agent configuration."""
     
-    template_config: Optional[dict] = Field(None, description="Template configuration")
-    system_prompt: Optional[str] = Field(None, description="System prompt")
-    conversation_config: Optional[dict] = Field(None, description="Conversation configuration")
-    toolsets: Optional[list[str]] = Field(None, description="List of available toolsets")
-    llm_config_id: Optional[str] = Field(None, description="LLM configuration ID")
+    template_config: Optional[dict] = Field(default=None, description="Template configuration")
+    system_prompt: Optional[str] = Field(default=None, description="System prompt")
+    conversation_config: Optional[dict] = Field(default=None, description="Conversation configuration")
+    toolsets: Optional[list[str]] = Field(default=None, description="List of available toolsets")
+    llm_config_id: Optional[str] = Field(default=None, description="LLM configuration ID")
     
     model_config = ConfigDict(extra="forbid")
 
@@ -88,28 +88,28 @@ class CreateAgentRequest(BaseModel):
     # Core fields - following API specification
     id: str = Field(..., description="Agent line ID (logical identifier)")
     name: str = Field(..., description="Agent name")
-    description: Optional[str] = Field(None, description="Agent description")
-    avatar_url: Optional[str] = Field(None, description="Agent avatar URL")
+    description: Optional[str] = Field(default=None, description="Agent description")
+    avatar_url: Optional[str] = Field(default=None, description="Agent avatar URL")
     type: str = Field(..., description="Agent type")
     
     # Template fields - following API specification
     template_id: str = Field(..., description="Template type identifier")
-    template_version_id: Optional[str] = Field("1.0.0", description="Template version string")
+    template_version_id: str = Field(default="1.0.0", description="Template version string")
     
     # Configuration fields
-    system_prompt: Optional[str] = Field(None, description="System prompt")
-    conversation_config: Optional[dict] = Field(None, description="Conversation configuration")
-    toolsets: Optional[list[str]] = Field(None, description="Available toolsets")
-    llm_config_id: Optional[str] = Field(None, description="LLM configuration ID")
-    template_config: Optional[dict] = Field(None, description="Template configuration")
+    system_prompt: Optional[str] = Field(default=None, description="System prompt")
+    conversation_config: Optional[dict] = Field(default=None, description="Conversation configuration")
+    toolsets: Optional[list[str]] = Field(default=None, description="Available toolsets")
+    llm_config_id: Optional[str] = Field(default=None, description="LLM configuration ID")
+    template_config: Optional[dict] = Field(default=None, description="Template configuration")
 
     # Metadata - following API specification
-    agent_line_id: Optional[str] = Field(None, description="Agent line ID")
-    version_type: Optional[str] = Field("beta", description="Version type: beta or release (default: beta)")
-    version_number: Optional[str] = Field("v1", description="Version number: 'v1', 'v2', etc. (default: v1)")
-    owner_id: Optional[str] = Field(None, description="Agent owner ID for beta access control")
-    status: Optional[str] = Field(
-        "draft", 
+    agent_line_id: Optional[str] = Field(default=None, description="Agent line ID")
+    version_type: str = Field(default="beta", description="Version type: beta or release (default: beta)")
+    version_number: str = Field(default="v1", description="Version number: 'v1', 'v2', etc. (default: v1)")
+    owner_id: Optional[str] = Field(default=None, description="Agent owner ID for beta access control")
+    status: str = Field(
+        default="draft", 
         description="Agent status: draft, submitted, pending, published, revoked (default: draft)"
     )
     

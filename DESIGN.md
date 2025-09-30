@@ -506,7 +506,7 @@ class ConversationAgent(BaseLangGraphAgent):
         metadata: Optional[dict[str, Any]] = None,
     ) -> ChatCompletionResponse:
         """执行对话Agent"""
-        graph = await self.graph
+        graph = await self.get_graph()
         
         # 构建初始状态
         initial_state = ConversationState(

@@ -143,7 +143,8 @@ class RuntimeClient:
     async def list_agents(self) -> list[AgentInfo]:
         """List all existing agents."""
         response = await self._request("GET", "agents/")
-        return [AgentInfo(**a) for a in response.json()]
+        agents_data = response.json()
+        return [AgentInfo(**agent_data) for agent_data in agents_data]
 
     async def get_agent(self, agent_id: str) -> Optional[AgentInfo]:
         """Get information about a specific agent."""
@@ -157,8 +158,24 @@ class RuntimeClient:
 
     async def create_agent(self, agent_request: CreateAgentRequest) -> AgentInfo:
         """Create a new agent."""
-        response = await self._request("POST", "agents/", json=agent_request.dict())
-        return AgentInfo(**response.json())
+        # Create the agent and get the creation response
+        response = await self._request("POST", "agents/", json=agent_request.model_dump())
+        create_response = response.json()
+        
+        # The server returns CreateAgentResponse: {"success": bool, "agent_id": str}
+        if not create_response.get("success"):
+            raise RuntimeError("Agent creation failed")
+        
+        agent_id = create_response.get("agent_id")
+        if not agent_id:
+            raise RuntimeError("Agent creation succeeded but no agent_id returned")
+            
+        # Fetch the full agent info to return consistent AgentInfo
+        agent_info = await self.get_agent(agent_id)
+        if not agent_info:
+            raise RuntimeError(f"Created agent {agent_id} but failed to retrieve it")
+            
+        return agent_info
 
     async def delete_agent(self, agent_id: str) -> bool:
         """Delete an existing agent."""
@@ -176,25 +193,58 @@ class RuntimeClient:
         self,
         agent_id: str,
         messages: list[ChatMessage],
-        stream: bool = False
+        stream: bool = False,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        metadata: Optional[dict] = None
     ) -> ChatCompletionResponse:
-        """Send messages to an agent and get a response."""
+        """Send messages to an agent and get a response using OpenAI-compatible format."""
         if stream:
             raise NotImplementedError("Use stream_chat_with_agent for streaming responses.")
 
-        payload = {"messages": [msg.dict() for msg in messages]}
-        response = await self._request("POST", f"agents/{agent_id}/chat", json=payload)
+        # Build OpenAI-compatible request payload
+        payload = {
+            "model": agent_id,
+            "messages": [{"role": msg.role.value, "content": msg.content} for msg in messages],
+            "stream": False
+        }
+        
+        # Add optional parameters
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        if metadata is not None:
+            payload["metadata"] = metadata
+
+        response = await self._request("POST", "chat/completions", json=payload)
         return ChatCompletionResponse(**response.json())
 
     async def stream_chat_with_agent(
         self,
         agent_id: str,
-        messages: list[ChatMessage]
+        messages: list[ChatMessage],
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        metadata: Optional[dict] = None
     ) -> AsyncGenerator[StreamingChunk, None]:
-        """Stream chat response from an agent."""
-        payload = {"messages": [msg.model_dump() for msg in messages]}
-        endpoint = f"agents/{agent_id}/chat/stream"
-        async with self.http_client.stream("POST", endpoint, json=payload) as response:
+        """Stream chat response from an agent using OpenAI-compatible format."""
+        # Build OpenAI-compatible request payload for streaming
+        payload = {
+            "model": agent_id,
+            "messages": [{"role": msg.role.value, "content": msg.content} for msg in messages],
+            "stream": True
+        }
+        
+        # Add optional parameters
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        if metadata is not None:
+            payload["metadata"] = metadata
+
+        async with self.http_client.stream("POST", "chat/completions", json=payload) as response:
             response.raise_for_status()
             async for line in response.aiter_lines():
                 if line.startswith("data: "):

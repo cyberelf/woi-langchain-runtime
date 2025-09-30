@@ -25,9 +25,7 @@ async def list_templates(
         # Filter by framework if specified
         if framework:
             templates = [t for t in templates if t.get("framework") == framework]
-
-        logger.info(f"Templates: {templates}")
-        
+   
         return {"templates": templates}
     except Exception as e:
         # Log the error and return a meaningful error response

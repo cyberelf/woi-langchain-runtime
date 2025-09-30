@@ -9,14 +9,9 @@ from pydantic import BaseModel, Field
 
 from runtime.infrastructure.frameworks.langgraph.llm.service import LangGraphLLMService
 from runtime.infrastructure.frameworks.langgraph.toolsets.service import LangGraphToolsetService
-from runtime.infrastructure.web.models.responses import (
-    StreamingChunk,
-    StreamingChunkChoice,
-    StreamingChunkDelta,
-)
+from runtime.core.executors import StreamingChunk
 from runtime.domain.value_objects.agent_configuration import AgentConfiguration
 from runtime.domain.value_objects.chat_message import ChatMessage
-from runtime.templates.base import BaseAgentTemplate
 from .base import BaseLangGraphAgent
 
 
@@ -59,15 +54,7 @@ class SimpleTestAgent(BaseLangGraphAgent):
         self.response_prefix = self.get_config_value("response_prefix", "Test: ")
         
         # Extract configuration values for LangGraph-specific setup
-        self.system_prompt = configuration.system_prompt or "You are a helpful assistant."
-        self.llm_config_id = configuration.llm_config_id
-        self.default_temperature = configuration.get_temperature()
-        self.default_max_tokens = configuration.get_max_tokens()
-        self.toolset_configs = configuration.get_toolset_names()
-        
-        # Create LangGraph-specific clients
-        self.llm_client = self._get_llm_client()
-        self.toolset_client = self._get_toolset_client()
+        self.system_prompt = self.system_prompt or "You are a helpful assistant."
 
     def _get_llm_client(self, temperature: Optional[float] = None, max_tokens: Optional[int] = None):
         """Get LLM client configured with execution parameters."""
@@ -137,60 +124,56 @@ class SimpleTestAgent(BaseLangGraphAgent):
         return content
 
     async def _process_stream_chunk(
-        self, 
-        chunk: Any, 
-        completion_id: str, 
-        start_time: float
+        self,
+        chunk: Any,
+        chunk_index: int = 0
     ) -> AsyncGenerator[StreamingChunk, None]:
         """Process streaming chunks for simple agent."""
-        
+
+
         # Process each chunk from LangGraph
         if isinstance(chunk, dict):
             # Look for message updates in the chunk
             messages_update = chunk.get("messages", [])
-            
+
             if messages_update:
                 # Get the latest message
                 latest_message = messages_update[-1]
-                
+
                 if hasattr(latest_message, 'content'):
                     current_content = latest_message.content
                 else:
                     current_content = str(latest_message)
-                
+
                 # Add prefix if this is the first chunk and prefix is configured
                 if self.response_prefix and not current_content.startswith(self.response_prefix):
                     current_content = self.response_prefix + current_content
-                
-                # Yield the content as a streaming chunk
+
+                # Yield the content as a streaming chunk (simplified core format)
                 yield StreamingChunk(
-                    id=completion_id,
-                    object="chat.completion.chunk",
-                    created=int(start_time),
-                    model=self.id,
-                    system_fingerprint="fp_simple",
-                    choices=[
-                        StreamingChunkChoice(
-                            index=0,
-                            delta=StreamingChunkDelta(content=current_content),
-                            finish_reason=None
-                        )
-                    ]
+                    content=current_content,
+                    finish_reason=None,
+                    metadata={
+                        'template_id': self.template_id,
+                        'framework': 'langgraph',
+                        'chunk_index': chunk_index
+                    }
                 )
         else:
+            # Handle non-dict chunks (strings, etc.)
+            content = str(chunk)
+
+            if self.response_prefix and not content.startswith(self.response_prefix):
+                content = self.response_prefix + content
+
             yield StreamingChunk(
-                id=completion_id,
-                object="chat.completion.chunk",
-                created=int(start_time),
-                model=self.id,
-                system_fingerprint="fp_simple",
-                choices=[
-                    StreamingChunkChoice(
-                        index=0,
-                        delta=StreamingChunkDelta(content=chunk),
-                        finish_reason=None
-                    )
-                ]
+                content=content,
+                finish_reason=None,
+                metadata={
+                    'template_id': self.template_id,
+                    'framework': 'langgraph',
+                    'chunk_index': chunk_index
+                }
             )
 
 

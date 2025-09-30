@@ -104,13 +104,13 @@ class AgentConfiguration:
         return params
     
     def get_template_configuration(self) -> dict[str, Any]:
-        """Get the template configuration that should be passed to BaseAgentTemplate.
+        """Get the template configuration that should be passed to agent templates.
         
         This merges template_config with core fields and conversation_config.
-        The result is what gets passed as the 'configuration' parameter to BaseAgentTemplate.__init__().
+        The result is what gets passed as the 'configuration' parameter to agent template constructors.
         
         Returns:
-            Dictionary suitable for BaseAgentTemplate.__init__(configuration=...)
+            Dictionary suitable for agent template constructors
         """
         merged = self.template_config.copy()
         

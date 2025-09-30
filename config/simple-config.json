@@ -1,0 +1,80 @@
+{
+  "_info": {
+    "description": "Simple LangChain Agent Runtime Configuration",
+    "version": "2.0.0",
+    "note": "Agent templates are discovered from code. Available: 'simple-test', 'workflow'"
+  },
+  "llm": {
+    "providers": {
+      "openai-default": {
+        "type": "openai",
+        "model": "gpt-4o-mini",
+        "api_key": "${OPENAI_API_KEY}",
+        "temperature": 0.7,
+        "max_tokens": 2000,
+        "metadata": {
+          "description": "OpenAI GPT-4o Mini - Cost-effective and capable",
+          "cost_per_1k_tokens": 0.0015
+        }
+      },
+      "local-llm": {
+        "type": "openai",
+        "model": "llama3.1:8b",
+        "base_url": "http://localhost:11434/v1",
+        "temperature": 0.7,
+        "max_tokens": 2000,
+        "metadata": {
+          "description": "Local Llama model via Ollama",
+          "deployment": "local",
+          "privacy": "high"
+        }
+      }
+    },
+    "default_provider": "openai-default",
+    "fallback_provider": "local-llm"
+  },
+  "toolsets": {
+    "toolsets": {
+      "basic-web": {
+        "type": "mcp",
+        "config": {
+          "servers": [
+            {
+              "name": "web-browser",
+              "command": "npx",
+              "args": ["@modelcontextprotocol/server-puppeteer"]
+            }
+          ],
+          "timeout": 30,
+          "description": "Basic web browsing",
+          "capabilities": ["browse_web", "extract_text"]
+        }
+      },
+      "basic-filesystem": {
+        "type": "mcp",
+        "config": {
+          "servers": [
+            {
+              "name": "filesystem",
+              "command": "npx", 
+              "args": ["@modelcontextprotocol/server-filesystem", "./workspace"]
+            }
+          ],
+          "timeout": 15,
+          "description": "Basic file operations",
+          "capabilities": ["read_file", "write_file", "list_directory"]
+        }
+      },
+      "basic-tools": {
+        "type": "custom",
+        "config": {
+          "tools_directory": "./tools",
+          "auto_discovery": true,
+          "timeout": 30,
+          "description": "Basic custom tools"
+        }
+      }
+    },
+    "default_toolsets": ["basic-filesystem", "basic-web"]
+  }
+}

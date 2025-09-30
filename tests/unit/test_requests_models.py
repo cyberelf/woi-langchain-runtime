@@ -235,9 +235,9 @@ class TestCreateAgentRequestParsing:
         """Test that CreateAgentRequest validation still works."""
         # Missing required fields should raise ValidationError
         with pytest.raises(ValidationError):
-            CreateAgentRequest(name="Test Agent")  # missing required fields
+            CreateAgentRequest(name="Test Agent")  # missing required fields  # pyright: ignore[reportCallIssue]
 
         with pytest.raises(ValidationError):
-            CreateAgentRequest(
+            CreateAgentRequest(  # pyright: ignore[reportCallIssue]
                 id="test", template_id="simple"
             )  # missing name, type, template_version_id, agent_line_id, owner_id

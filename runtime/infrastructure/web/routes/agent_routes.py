@@ -25,7 +25,7 @@ from ..dependencies import (
     get_delete_agent_service,
     get_update_agent_status_service
 )
-from ....auth import runtime_auth
+from ..auth import runtime_auth
 
 logger = logging.getLogger(__name__)
 

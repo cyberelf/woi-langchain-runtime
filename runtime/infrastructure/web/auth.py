@@ -2,7 +2,7 @@
 
 from fastapi import HTTPException, Request, status
 
-from .config import settings
+from ...settings import settings
 
 
 class RuntimeTokenAuth:

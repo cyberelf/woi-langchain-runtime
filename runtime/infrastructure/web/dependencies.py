@@ -2,14 +2,17 @@
 
 import logging
 from functools import lru_cache
-from typing import Dict, Any
+from typing import Any, Optional
 
-from ...config import settings
-from ...core.message_queue import create_message_queue, MessageQueueInterface
-from ...core.agent_task_manager import AgentTaskManager
-from ..frameworks.executor_base import FrameworkExecutor
+from runtime.domain.services.template_validation_service import TemplateValidationInterface
+
+from ...settings import settings
+from ...core.message_queue import MessageQueueInterface
+from ..message_queues import create_message_queue
+from ...core.agent_orchestrator import AgentOrchestrator
+from ...core.executors import FrameworkExecutorInterface
 from ..frameworks.langgraph.executor import LangGraphFrameworkExecutor
-from ...application.services.execute_agent_service import ExecuteAgentServiceV2, ExecuteAgentServiceAdapter
+from ...application.services.execute_agent_service import ExecuteAgentService
 from ...application.services.create_agent_service import CreateAgentService
 from ...application.services.query_agent_service import QueryAgentService
 from ...application.services.update_agent_service import UpdateAgentService
@@ -20,10 +23,11 @@ from ..unit_of_work.in_memory_uow import TransactionalInMemoryUnitOfWork
 logger = logging.getLogger(__name__)
 
 # Global instances for the new architecture
-_message_queue: MessageQueueInterface = None
-_framework_executor: FrameworkExecutor = None
-_task_manager: AgentTaskManager = None
-_execute_service: ExecuteAgentServiceV2 = None
+_message_queue: Optional[MessageQueueInterface] = None
+_framework_executor: Optional[FrameworkExecutorInterface] = None
+_orchestrator: Optional[AgentOrchestrator] = None
+_execute_service: Optional[ExecuteAgentService] = None
+_agent_template_validator: Optional[TemplateValidationInterface] = None
 
 
 @lru_cache()
@@ -47,7 +51,7 @@ def get_message_queue() -> MessageQueueInterface:
 
 
 @lru_cache()
-def get_framework_executor() -> FrameworkExecutor:
+def get_framework_executor() -> FrameworkExecutorInterface:
     """Get framework executor instance."""
     global _framework_executor
     
@@ -70,41 +74,56 @@ def get_unit_of_work() -> TransactionalInMemoryUnitOfWork:
     return TransactionalInMemoryUnitOfWork()
 
 
-async def get_task_manager() -> AgentTaskManager:
-    """Get task manager instance."""
-    global _task_manager
+@lru_cache()
+def get_agent_template_validator() -> TemplateValidationInterface:
+    """Get agent template validator instance."""
+    global _agent_template_validator
     
-    if _task_manager is None:
-        logger.info("Initializing agent task manager")
+    if _agent_template_validator is None:
+        if settings.default_framework == "langgraph":
+            _agent_template_validator = LangGraphFrameworkExecutor()
+        else:
+            raise ValueError(f"Unsupported framework: {settings.default_framework}")
+    
+    return _agent_template_validator
+
+
+async def get_orchestrator() -> AgentOrchestrator:
+    """Get agent orchestrator instance (A2A-aligned)."""
+    global _orchestrator
+    
+    if _orchestrator is None:
+        logger.info("Initializing agent orchestrator")
         
         message_queue = get_message_queue()
         uow = get_unit_of_work()
         framework_executor = get_framework_executor()
         
-        _task_manager = AgentTaskManager(
+        _orchestrator = AgentOrchestrator(
             message_queue=message_queue,
             uow=uow,
+            framework_executor=framework_executor,
             max_workers=settings.task_manager_workers,
             cleanup_interval_seconds=settings.task_cleanup_interval,
             instance_timeout_seconds=settings.instance_timeout
         )
         
-        # Initialize task manager with framework
-        await _task_manager.initialize(framework_executor)
+        # Initialize orchestrator
+        await _orchestrator.initialize()
         
-        logger.info(f"Task manager initialized with {settings.task_manager_workers} workers")
+        logger.info(f"Agent orchestrator initialized with {settings.task_manager_workers} workers")
     
-    return _task_manager
+    return _orchestrator
 
 
-async def get_execute_agent_service() -> ExecuteAgentServiceV2:
-    """Get new execute agent service."""
+async def get_execute_agent_service() -> ExecuteAgentService:
+    """Get execute agent service (A2A-aligned)."""
     global _execute_service
     
     if _execute_service is None:
-        task_manager = await get_task_manager()
-        _execute_service = ExecuteAgentServiceV2(task_manager)
-        logger.info("Execute agent service V2 initialized")
+        orchestrator = await get_orchestrator()
+        _execute_service = ExecuteAgentService(orchestrator)
+        logger.info("Execute agent service initialized with A2A terminology")
     
     return _execute_service
 
@@ -114,8 +133,8 @@ def get_create_agent_service() -> CreateAgentService:
     uow = get_unit_of_work()
     # Use the framework executor directly as the template validator
     # since it now implements TemplateValidationInterface
-    framework_executor = get_framework_executor()
-    return CreateAgentService(uow, framework_executor)
+    template_validator = get_agent_template_validator()
+    return CreateAgentService(uow, template_validator)
 
 
 def get_query_agent_service() -> QueryAgentService:
@@ -155,16 +174,16 @@ async def startup_dependencies():
         framework_executor = get_framework_executor()
         await framework_executor.initialize()
         
-        # Initialize task manager
-        task_manager = await get_task_manager()
-        # Task manager is initialized in get_task_manager()
+        # Initialize orchestrator
+        orchestrator = await get_orchestrator()
+        # Orchestrator is initialized in get_orchestrator()
         
         logger.info("All dependencies initialized successfully")
         
         return {
             "message_queue": message_queue,
             "framework_executor": framework_executor,
-            "task_manager": task_manager
+            "orchestrator": orchestrator
         }
         
     except Exception as e:
@@ -176,13 +195,13 @@ async def shutdown_dependencies():
     """Shutdown all dependencies."""
     logger.info("Shutting down dependencies")
     
-    global _task_manager, _framework_executor, _message_queue, _execute_service
+    global _orchestrator, _framework_executor, _message_queue, _execute_service
     
     try:
-        # Shutdown task manager first
-        if _task_manager:
-            await _task_manager.shutdown()
-            _task_manager = None
+        # Shutdown orchestrator first
+        if _orchestrator:
+            await _orchestrator.shutdown()
+            _orchestrator = None
         
         # Shutdown framework executor
         if _framework_executor:
@@ -203,7 +222,7 @@ async def shutdown_dependencies():
         logger.error(f"Error during dependency shutdown: {e}")
 
 
-def get_architecture_info() -> Dict[str, Any]:
+def get_architecture_info() -> dict[str, Any]:
     """Get information about the current architecture."""
     return {
         "architecture_version": "v2",

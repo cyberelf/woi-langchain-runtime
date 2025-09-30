@@ -40,6 +40,21 @@ class Settings(BaseSettings):
     debug: bool = Field(default=False, alias="DEBUG")
     reload: bool = Field(default=False, alias="RELOAD")
     
+    @property
+    def effective_log_level(self) -> str:
+        """Get the effective log level based on debug setting.
+        
+        If debug is True, use DEBUG level unless LOG_LEVEL is explicitly set to something else.
+        If debug is False, use the configured log_level (default INFO).
+        """
+        # If LOG_LEVEL env var is explicitly set and differs from default, use it
+        import os
+        if "LOG_LEVEL" in os.environ:
+            return self.log_level
+        
+        # Otherwise, let debug setting control the log level
+        return "DEBUG" if self.debug else "INFO"
+    
     # Framework configuration
     default_framework: str = Field(default="langgraph", alias="DEFAULT_FRAMEWORK")
     enabled_frameworks: str = Field(default="langgraph", alias="ENABLED_FRAMEWORKS")  # Comma-separated
@@ -58,6 +73,12 @@ class Settings(BaseSettings):
     # Message queue limits
     max_queue_size: int = Field(default=10000, alias="MAX_QUEUE_SIZE")
     message_retention_hours: int = Field(default=24, alias="MESSAGE_RETENTION_HOURS")
+    
+    # Services configuration file
+    services_config_file: Optional[str] = Field(
+        default="config/services-config.json", alias="SERVICES_CONFIG_FILE"
+    )
+    services_config_json: str = Field(default="{}", alias="SERVICES_CONFIG")  # Fallback JSON string
 
     model_config = SettingsConfigDict(
         env_file=".env",

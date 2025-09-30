@@ -9,6 +9,9 @@ from enum import Enum
 from typing import Any, Dict, List, NewType, Optional, Union
 from uuid import UUID
 
+# Import domain objects that are needed by core types
+from ..domain.value_objects.chat_message import ChatMessage, MessageRole
+
 
 # Core ID types for type safety
 AgentId = NewType("AgentId", str)
@@ -65,3 +68,17 @@ PaginatedResult = Dict[str, Any]
 # Error response types
 ErrorDetails = Dict[str, Any]
 ErrorResponse = Dict[str, Union[str, int, ErrorDetails]]
+
+# Export all public types
+__all__ = [
+    # Core ID types
+    "AgentId", "SessionId", "TemplateId", "ToolsetId", "UserId",
+    # Enums
+    "ComponentStatus", "LogLevel", "Environment",
+    # Domain objects
+    "ChatMessage", "MessageRole",
+    # Type aliases
+    "ConfigDict", "MetadataDict", "HeadersDict", "QueryParams",
+    "HealthStatus", "HealthMetrics", "PaginationParams", "PaginatedResult",
+    "ErrorDetails", "ErrorResponse"
+]

@@ -15,6 +15,7 @@ Each step is a natural language prompt together with configuration that will be 
 ```
 """
 
+import logging
 from collections.abc import AsyncGenerator
 from typing import Any, Literal, Optional
 from enum import Enum
@@ -29,14 +30,12 @@ from pydantic import BaseModel, Field, field_validator
 
 from runtime.infrastructure.frameworks.langgraph.llm.service import LangGraphLLMService
 from runtime.infrastructure.frameworks.langgraph.toolsets.service import LangGraphToolsetService
-from runtime.infrastructure.web.models.responses import (
-    StreamingChunk,
-    StreamingChunkChoice,
-    StreamingChunkDelta,
-)
+from runtime.core.executors import StreamingChunk
 from runtime.domain.value_objects.chat_message import ChatMessage
 from runtime.domain.value_objects.agent_configuration import AgentConfiguration
 from .base import BaseLangGraphAgent
+
+logger = logging.getLogger(__name__)
 
 
 class StepStatus(str, Enum):
@@ -333,31 +332,47 @@ class WorkflowAgent(BaseLangGraphAgent):
     async def _execute_step_node(self, state: WorkflowState) -> WorkflowState:
         """Execute the current workflow step (individual LangGraph node)."""
         if state.current_step >= len(self.workflow_steps):
+            logger.debug(f"🏁 Workflow completed: step {state.current_step} >= {len(self.workflow_steps)}")
             return state
             
         current_step = self.workflow_steps[state.current_step]
+        logger.info(f"⚡ Executing workflow step {state.current_step + 1}/{len(self.workflow_steps)}: {current_step.name}")
+        logger.debug(f"🔍 Step details - tools: {len(current_step.tools)}, "
+                    f"depends_on: {current_step.depends_on}")
+        
         current_step.status = StepStatus.RUNNING
           
         # Execute the step using base class utility
         system_prompt, user_prompt = self._get_prompts(state)
         tools = await self.get_tools(current_step.tools)
+        logger.debug(f"✅ Tools loaded: {[tool.name for tool in tools]}")
 
         # Compose the prompt messages
-        prompt_messages = [
+        prompt_messages: list[BaseMessage] = [
             SystemMessage(content=system_prompt)
         ]
         # Optionally, prepend prior conversation history if needed
         if hasattr(state, "messages") and state.messages:
             # If state.messages exists, include it before the current prompts
+            logger.debug(f"💬 Including {len(state.messages)} previous messages in context")
             prompt_messages = prompt_messages + state.messages + [HumanMessage(content=user_prompt)]
+        else:
+            prompt_messages.append(HumanMessage(content=user_prompt))
 
+        logger.debug(f"🤖 Invoking LLM for step '{current_step.name}' with {len(prompt_messages)} messages")
+        
         # Execute LLM with tools bound (ToolNode will handle tool calls)
         llm_with_tools = self.llm_client.bind_tools(tools)
         result = await llm_with_tools.ainvoke(prompt_messages)
+
+        logger.debug(f"📄 Result type: {type(result).__name__}, "
+                    f"has tool_calls: {hasattr(result, 'tool_calls') and bool(getattr(result, 'tool_calls', None))}")
         
         # Add result to messages for potential tool processing
         state.messages.append(result)
         state = self._process_step_completion(state, result)
+        
+        logger.info(f"✅ Step '{current_step.name}' (status: {current_step.status})")
             
         return state
     
@@ -365,17 +380,23 @@ class WorkflowAgent(BaseLangGraphAgent):
         """Determine if workflow should continue to next step or end."""
         # last message should be an AI message
         if state.status in ["completed", "failed"]:
+            logger.debug(f"🔚 Workflow ending: status={state.status}")
             return "end"
         else:
+            logger.debug(f"➡️  Workflow continuing: step {state.current_step}/{len(self.workflow_steps)}")
             return "continue"
     
     def _route_after_step(self, state: WorkflowState) -> Literal["continue", "end", "tools"]:
         """Update state after step execution or make tool calls."""
         # If no tool calls, process workflow commands immediately
         result = state.messages[-1]
-        if not (hasattr(result, 'tool_calls') or getattr(result, 'tool_calls', None)):
+        has_tool_calls = hasattr(result, 'tool_calls') and bool(getattr(result, 'tool_calls', None))
+        
+        if not has_tool_calls:
+            logger.debug(f"🚫 No tool calls found, routing to workflow continuation")
             return self._should_continue(state)
         else:
+            logger.debug(f"🔧 Tool calls detected, routing to tools")
             return "tools"
     
     async def _build_graph(self) -> CompiledStateGraph:
@@ -470,8 +491,7 @@ class WorkflowAgent(BaseLangGraphAgent):
     async def _process_stream_chunk(
         self, 
         chunk: Any, 
-        completion_id: str, 
-        start_time: float
+        chunk_index: int = 0
     ) -> AsyncGenerator[StreamingChunk, None]:
         """Process streaming chunks for workflow agent."""
         
@@ -481,45 +501,40 @@ class WorkflowAgent(BaseLangGraphAgent):
             if current_step < len(chunk.steps):
                 step = chunk.steps[current_step]
                 
-                # Yield step progress
+                # Yield step progress with simplified core format
                 if step.status == StepStatus.RUNNING:
-                    content = f"🔄 Executing {step.name}...\n"
+                    content = f"🔄 Executing {step.name}..."
                 elif step.status == StepStatus.COMPLETED:
                     result_preview = step.result_content[:100] if step.result_content else 'No result'
-                    content = f"✅ {step.name}: Completed\n   Result: {result_preview}...\n\n"
+                    content = f"✅ {step.name}: Completed\n   Result: {result_preview}..."
                 elif step.status == StepStatus.PENDING:
-                    content = f"{step.name}: Pending...\n\n"
+                    content = f"{step.name}: Pending..."
                 else:
                     content = ""
                 
                 if content:
                     yield StreamingChunk(
-                        id=completion_id,
-                        object="chat.completion.chunk",
-                        created=int(start_time),
-                        model=self.id,
-                        system_fingerprint="fp_workflow",
-                        choices=[
-                            StreamingChunkChoice(
-                                index=0,
-                                delta=StreamingChunkDelta(content=content),
-                                finish_reason=None
-                            )
-                        ]
+                        content=content,
+                        finish_reason=None,
+                        metadata={
+                            'template_id': self.template_id,
+                            'framework': 'langgraph',
+                            'chunk_index': chunk_index,
+                            'step_name': step.name,
+                            'step_status': step.status,
+                            'current_step': current_step,
+                            'total_steps': len(chunk.steps)
+                        }
                     )
         else:
+            # Handle non-WorkflowState chunks
             yield StreamingChunk(
-                id=completion_id,
-                object="chat.completion.chunk",
-                created=int(start_time),
-                model=self.id,
-                system_fingerprint="fp_workflow",
-                choices=[
-                    StreamingChunkChoice(
-                        index=0,
-                        delta=StreamingChunkDelta(content=chunk),
-                        finish_reason=None
-                    )
-                ]
+                content=str(chunk),
+                finish_reason=None,
+                metadata={
+                    'template_id': self.template_id,
+                    'framework': 'langgraph',
+                    'chunk_index': chunk_index
+                }
             )
     

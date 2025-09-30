@@ -5,6 +5,7 @@ This module provides utilities for LangGraph-based agent templates.
 
 from dataclasses import dataclass
 from typing import Any, Optional
+import logging
 
 # Removed domain abstraction - using concrete implementation
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -15,13 +16,16 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
 from ..config import LLMConfig
+
+logger = logging.getLogger(__name__)
+
 class TestChatModel(BaseChatModel):
     """Simple test chat model for testing - no API keys required."""
-    
+
     @property
     def _llm_type(self) -> str:
         return "test"
-    
+
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -34,6 +38,22 @@ class TestChatModel(BaseChatModel):
         message = AIMessage(content=test_response)
         generation = ChatGeneration(message=message)
         return ChatResult(generations=[generation])
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager = None,
+        **kwargs,
+    ):
+        """Stream a test response."""
+        test_response = "Test response from mock LLM"
+        # Stream the response word by word
+        words = test_response.split()
+        for i, word in enumerate(words):
+            content = word + (" " if i < len(words) - 1 else "")
+            message = AIMessage(content=content)
+            yield ChatGeneration(message=message)
 
 
 @dataclass
@@ -98,6 +118,8 @@ class LangGraphLLMService:
                 metadata=provider_config.metadata
             )
         
+        logger.warning(f"No provider found for {llm_config_id}, falling back to test provider")
+
         # Fallback to test provider
         return LLMConfiguration(
             provider="test",
@@ -107,7 +129,7 @@ class LangGraphLLMService:
             metadata={}
         )
 
-    def get_client(self, llm_config_id: Optional[str] = None, **execution_params):
+    def get_client(self, llm_config_id: Optional[str] = None, **execution_params) -> BaseChatModel:
         """Get the LangGraph LLM client with optional execution parameter overrides.
         
         Args:
@@ -120,6 +142,8 @@ class LangGraphLLMService:
         final_temperature = execution_params.get("temperature", llm_config.temperature)
         final_max_tokens = execution_params.get("max_tokens", llm_config.max_tokens)
         
+        logger.debug(f"Getting LLM client for {llm_config.provider} with model {llm_config.model}, temperature {final_temperature}, max_tokens {final_max_tokens}, metadata {llm_config.metadata}")
+
         if llm_config.provider == "openai":
             return ChatOpenAI(
                 model=llm_config.model,

@@ -1,7 +1,7 @@
 """LangGraph framework configuration models."""
 
 from typing import Optional, Any, Literal
-from pydantic import BaseModel, Field, field_validator, validator
+from pydantic import BaseModel, Field, field_validator, model_validator, validator
 
 
 class LLMProviderConfig(BaseModel):
@@ -17,14 +17,14 @@ class LLMProviderConfig(BaseModel):
     max_tokens: int = Field(1000, gt=0, description="Default max tokens")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional provider metadata")
     
-    @validator("api_key")
-    def validate_api_key(cls, v, values):
+    @model_validator(mode="after")
+    def validate_api_key(self):
         """Validate API key for non-test providers."""
-        provider_type = values.get("type")
-        if provider_type != "test" and not v:
+        provider_type = self.type
+        if provider_type != "test" and not self.api_key:
             # In production, this might be required. For now, just warn.
             pass
-        return v
+        return self
 
 
 class LLMConfig(BaseModel):
@@ -43,19 +43,14 @@ class LLMConfig(BaseModel):
             raise ValueError("Providers cannot be empty")
         return v
 
-    @field_validator("default_provider")
-    def validate_default_provider(cls, v, values):
+    @model_validator(mode="after")
+    def validate_default_provider(self):
         """Validate that default provider exists in providers."""
-        if v and v not in values.get("providers", {}):
-            raise ValueError(f"Default provider {v} not found in providers")
-        return v
-
-    @field_validator("fallback_provider")
-    def validate_fallback_provider(cls, v, values):
-        """Validate that fallback provider exists in providers."""
-        if v and v not in values.get("providers", {}):
-            raise ValueError(f"Fallback provider {v} not found in providers")
-        return v
+        if self.default_provider and self.default_provider not in self.providers:
+            raise ValueError(f"Default provider {self.default_provider} not found in providers")
+        if self.fallback_provider and self.fallback_provider not in self.providers:
+            raise ValueError(f"Fallback provider {self.fallback_provider} not found in providers")
+        return self
 
     def get_provider_config(self, provider_name: Optional[str] = None) -> LLMProviderConfig:
         """Get configuration for a specific provider."""
@@ -86,9 +81,9 @@ class ToolsetConfig(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict, description="Toolset-specific configuration")
     
     @field_validator("config")
-    def validate_config_by_type(cls, v, values):
+    def validate_config_by_type(cls, v):
         """Validate configuration based on toolset type."""
-        toolset_type = values.get("type")
+        toolset_type = v.get("type")
         
         if toolset_type == "mcp":
             # Validate MCP configuration
@@ -128,17 +123,14 @@ class ToolsetsConfig(BaseModel):
         default_factory=list, description="Default toolset names to load"
     )
     
-    @field_validator("default_toolsets")
-    def validate_default_toolsets(cls, v, values):
+    @model_validator(mode="after")
+    def validate_default_toolsets(self):
         """Validate that default toolsets exist in toolsets."""
-        toolsets = values.get("toolsets", {})
-        invalid_toolsets = [name for name in v if name not in toolsets]
-        
-        if invalid_toolsets:
-            # Just warn, don't fail validation
-            pass
-            
-        return v
+        if self.default_toolsets:
+            for name in self.default_toolsets:
+                if name not in self.toolsets:
+                    raise ValueError(f"Default toolset {name} not found in toolsets")
+        return self
     
     def get_toolset_config(self, toolset_name: str) -> Optional[ToolsetConfig]:
         """Get configuration for a specific toolset."""

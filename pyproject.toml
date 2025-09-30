@@ -75,7 +75,6 @@ typeCheckingMode = "basic"
 # Don't report missing type annotations (like ruff)
 reportMissingTypeStubs = false
 reportMissingParameterType = false
-reportMissingReturnType = false
 reportUnknownVariableType = false
 reportUnknownArgumentType = false
 reportUnknownLambdaType = false
@@ -87,7 +86,7 @@ reportPrivateUsage = false
 reportUnnecessaryIsInstance = false
 reportGeneralTypeIssues = false
 # Keep only important type errors
-reportInvalidTypeVarUsage = true
+reportInvalidTypeVarUse = true
 reportSelfClsParameterName = true
 # Ignore venv
 exclude = ["**/.venv", "**/venv", "**/env", "**/envs"]

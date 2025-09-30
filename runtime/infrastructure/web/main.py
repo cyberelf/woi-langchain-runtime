@@ -8,14 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .routes import agent_routes, execution_routes, template_routes
 from .dependencies import startup_dependencies, shutdown_dependencies, get_architecture_info
-from ...auth import runtime_auth
+from .auth import runtime_auth
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-
+# Logging is configured in main.py - don't override it here
 logger = logging.getLogger(__name__)
 
 
@@ -97,89 +92,31 @@ def create_app() -> FastAPI:
             "status": "healthy",
             "version": "2.1.0",
             "architecture": "DDD + Async Task Management",
-            "timestamp": "2024-03-20T10:00:00Z"
+            "timestamp": "2024-03-20T10:00:00Z",
+            "orchestrator": {
+                "running": False,
+                "workers": 0,
+                "active_instances": 0,
+                "running_messages": 0
+            }
         }
         
         # Add architecture info
         base_health.update(get_architecture_info())
         
-        # Add task manager health if available
+        # Add orchestrator health if available
         if hasattr(app.state, 'dependencies'):
             deps = app.state.dependencies
-            if 'task_manager' in deps:
-                task_manager = deps['task_manager']
-                base_health['task_manager'] = {
-                    "running": task_manager._running,
-                    "workers": len(task_manager._task_workers),
-                    "active_instances": len(task_manager._agent_instances),
-                    "running_tasks": len(task_manager._running_tasks)
+            if 'orchestrator' in deps:
+                orchestrator = deps['orchestrator']
+                base_health['orchestrator'] = {
+                    "running": orchestrator._running,
+                    "workers": len(orchestrator._message_workers),
+                    "active_instances": len(orchestrator._agent_instances),
+                    "running_messages": len(orchestrator._running_messages)
                 }
         
         return base_health
-    
-    @app.get("/v1/schema")
-    async def get_schema(_: bool = Depends(runtime_auth)):
-        """Get runtime schema endpoint."""
-        return {
-            "version": "2.1.0",
-            "lastUpdated": "2024-03-20T10:00:00Z",
-            "architecture": "async_task_management",
-            "supportedAgentTemplates": [
-                {
-                    "template_name": "智能客服助手",
-                    "template_id": "customer-service-bot",
-                    "version": "1.0.0",
-                    "type": "conversation",
-                    "configSchema": {
-                        "template_name": "智能客服助手",
-                        "template_id": "customer-service-bot",
-                        "sections": [
-                            {
-                                "id": "conversation",
-                                "title": "对话设置",
-                                "description": "配置智能体的对话行为",
-                                "fields": [
-                                    {
-                                        "id": "continuous",
-                                        "type": "checkbox",
-                                        "label": "持续对话模式",
-                                        "description": "启用持续对话以保持上下文连贯性",
-                                        "defaultValue": True
-                                    },
-                                    {
-                                        "id": "historyLength",
-                                        "type": "number",
-                                        "label": "对话历史长度",
-                                        "description": "保留的最大历史消息数量",
-                                        "defaultValue": 10,
-                                        "validation": {
-                                            "min": 5,
-                                            "max": 100
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    }
-                }
-            ],
-            "capabilities": {
-                "streaming": True,
-                "toolCalling": True,
-                "multimodal": False,
-                "codeExecution": True,
-                "sessionManagement": True,
-                "asyncExecution": True,
-                "horizontalScaling": True
-            },
-            "limits": {
-                "maxConcurrentAgents": 100,
-                "maxMessageLength": 32000,
-                "maxConversationHistory": 100,
-                "maxTaskWorkers": 50,
-                "sessionTimeoutSeconds": 7200
-            }
-        }
     
     return app
 
