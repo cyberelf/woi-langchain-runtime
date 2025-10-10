@@ -31,7 +31,7 @@ class SimpleTestAgent(BaseLangGraphAgent):
 
     # Template metadata (class variables)
     template_name: str = "Simple Test Agent"
-    template_id: str = "langgraph-simple-test"
+    template_id: str = "simple-test"
     template_version: str = "1.0.0"
     template_description: str = "Simple test agent for system validation"
     framework: str = "langgraph"
@@ -92,7 +92,7 @@ class SimpleTestAgent(BaseLangGraphAgent):
         llm_client = self.llm_client
         
         return create_react_agent(
-            model=llm_client,  # type: ignore - LLMClient is actually a BaseChatModel at runtime
+            model=llm_client, 
             tools=tools,
             prompt=self.system_prompt
         )

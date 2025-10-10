@@ -7,6 +7,7 @@ from ...domain.services.agent_validation_service import AgentValidationService
 from ...domain.services.template_validation_service import TemplateValidationInterface
 from ...domain.unit_of_work.unit_of_work import UnitOfWorkInterface
 from ...domain.events.domain_events import AgentCreated
+from ...domain.value_objects.agent_id import AgentId
 from ..commands.create_agent_command import CreateAgentCommand
 
 logger = logging.getLogger(__name__)
@@ -63,15 +64,23 @@ class CreateAgentService:
                 if validation_errors:
                     raise ValueError(f"Agent validation failed: {', '.join(validation_errors)}")
                 
-                # 5. Check uniqueness constraint
+                # 5. Check uniqueness constraints
+                # Check ID uniqueness
+                if command.agent_id:
+                    agent_id_vo = AgentId.from_string(command.agent_id)
+                    existing_agent_by_id = await self.uow.agents.get_by_id(agent_id_vo)
+                    if existing_agent_by_id:
+                        raise ValueError(f"Agent with ID '{command.agent_id}' already exists")
+
+                # Check name uniqueness
                 existing_agent = await self.uow.agents.get_by_name(command.name)
                 if existing_agent:
                     raise ValueError(f"Agent with name '{command.name}' already exists")
                 
-                # 6. Save to repository
+                # 7. Save to repository
                 await self.uow.agents.save(agent)
-                
-                # 7. Raise domain event
+
+                # 8. Raise domain event
                 event = AgentCreated.create(
                     agent_id=agent.id,
                     agent_name=agent.name,

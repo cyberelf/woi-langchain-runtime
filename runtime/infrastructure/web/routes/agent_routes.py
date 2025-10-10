@@ -15,8 +15,7 @@ from ....application.services.delete_agent_service import DeleteAgentService
 from ....application.services.update_agent_status_service import UpdateAgentStatusService
 from ....application.queries.get_agent_query import GetAgentQuery, ListAgentsQuery
 from ....domain.value_objects.agent_id import AgentId
-from ..models.requests import CreateAgentRequest
-from ..models.agent_requests import UpdateAgentRequest, UpdateAgentStatusRequest
+from ..models.requests import CreateAgentRequest, UpdateAgentRequest, UpdateAgentStatusRequest
 from ..models.responses import AgentResponse, CreateAgentResponse
 from ..dependencies import (
     get_create_agent_service, 

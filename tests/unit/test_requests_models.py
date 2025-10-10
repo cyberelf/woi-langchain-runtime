@@ -32,7 +32,6 @@ class TestAgentIdentityModel:
             name="Test Agent",
             description="A test agent for validation",
             avatar_url="https://example.com/avatar.png",
-            type="test",
             owner_id="user-456",
             status="active",
             agent_line_id="line-789",
@@ -44,7 +43,6 @@ class TestAgentIdentityModel:
         assert identity.name == "Test Agent"
         assert identity.description == "A test agent for validation"
         assert identity.avatar_url == "https://example.com/avatar.png"
-        assert identity.type == "test"
         assert identity.owner_id == "user-456"
         assert identity.status == "active"
         assert identity.agent_line_id == "line-789"
@@ -171,7 +169,6 @@ class TestCreateAgentRequestParsing:
             id="test-agent-123",
             name="Test Agent",
             description="A test agent",
-            type="task",
             template_id="simple-test",
             template_version_id="1.0.0",
             template_config={"setting": "value"},
@@ -211,7 +208,6 @@ class TestCreateAgentRequestParsing:
         request = CreateAgentRequest(
             id="test-agent-123",
             name="Test Agent",
-            type="task",
             template_id="simple-test",
             template_version_id="v1.0.0-alpha",
             template_config={"setting": "value"},

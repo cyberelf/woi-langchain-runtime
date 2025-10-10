@@ -4,6 +4,8 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest_asyncio
+
 from runtime.infrastructure.message_queues.in_memory import InMemoryMessageQueue
 from runtime.core.message_queue import (
     QueueMessage,
@@ -21,7 +23,7 @@ from runtime.domain.value_objects.chat_message import ChatMessage
 class TestInMemoryMessageQueueIntegration:
     """Test InMemoryMessageQueue integration with real usage patterns."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def queue(self):
         """Create and initialize a message queue."""
         queue = InMemoryMessageQueue()

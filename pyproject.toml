@@ -50,7 +50,7 @@ packages = ["runtime"]
 
 [tool.ruff]
 line-length = 110
-lint.select = ["E", "F", "I", "UP"]
+lint.select = ["E", "F", "I", "UP", "B012"] # B012 jump-statement-in-finally is for 3.14 compatibility
 lint.ignore = ["I001", "UP045"]
 lint.fixable = ["E501", "UP006"]
 exclude = [".venv", "build", "dist", "migrations"]

@@ -376,6 +376,16 @@ class AgentOrchestrator:
             # Cleanup stream queue
             await self.message_queue.delete_queue(stream_queue)
     
+    async def agent_exists(self, agent_id: str) -> bool:
+        """Check if an agent exists in the repository."""
+        try:
+            async with self.uow:
+                agent_id_vo = AgentId.from_string(agent_id)
+                agent = await self.uow.agents.get_by_id(agent_id_vo)
+                return agent is not None
+        except Exception:
+            return False
+
     async def get_or_create_agent_instance(
         self,
         agent_id: str,
@@ -462,6 +472,7 @@ class AgentOrchestrator:
         
         while self._running:
             try:
+                logger.debug(f"Worker {worker_id} waiting for messages...")
                 # Receive message from queue
                 message = await self.message_queue.receive_message(
                     queue_name=self.MESSAGE_QUEUE,

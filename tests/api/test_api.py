@@ -38,46 +38,40 @@ def test_ping_endpoint(client):
     assert data["message"] == "pong"
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_get_schema(client, auth_headers):
-    """Test schema endpoint."""
-    response = client.get("/v1/schema", headers=auth_headers)
+    """Test templates endpoint (replaces schema endpoint)."""
+    response = client.get("/v1/templates/", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
-    assert "version" in data
-    assert "supportedAgentTemplates" in data
-    assert "capabilities" in data
-    assert "limits" in data
+    assert "templates" in data
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_create_agent(client, auth_headers):
     """Test agent creation."""
     agent_data = {
         "id": "test-agent-1",
         "name": "Test Agent",
         "description": "A test agent",
-        "type": "conversation",
-        "template_id": "customer-service-bot",
+        "template_id": "simple-test",
         "template_version_id": "1.0.0",
         "template_config": {
-            "conversation": {
-                "continuous": True,
-                "historyLength": 10,
-            },
+            "response_prefix": "Test: ",
+            "system_prompt": "You are a helpful assistant."
         },
         "system_prompt": "You are a test agent.",
-        "llm_config_id": "test-llm-config",
+        "llm_config_id": "test-mock",
     }
 
-    response = client.post("/v1/agents", json=agent_data, headers=auth_headers)
+    response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     assert response.status_code == 201
     data = response.json()
     assert data["success"] is True
     assert data["agent_id"] == "test-agent-1"
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_health_check(client, auth_headers):
     """Test health check endpoint."""
     response = client.get("/v1/health", headers=auth_headers)
@@ -91,19 +85,19 @@ def test_health_check(client, auth_headers):
 
 def test_unauthorized_access(client):
     """Test unauthorized access."""
-    response = client.get("/v1/schema")
+    response = client.get("/v1/templates/")
     assert response.status_code == 401
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_invalid_token(client):
     """Test invalid token."""
     headers = {"X-Runtime-Token": "invalid-token"}
-    response = client.get("/v1/schema", headers=headers)
+    response = client.get("/v1/templates/", headers=headers)
     assert response.status_code == 401
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_execute_agent(client, auth_headers):
     """Test agent execution via OpenAI-compatible chat completions."""
     # First create an agent
@@ -111,21 +105,18 @@ def test_execute_agent(client, auth_headers):
         "id": "test-agent-execution",
         "name": "Test Execution Agent",
         "description": "A test agent for execution",
-        "type": "conversation",
         "template_id": "simple-test",
         "template_version_id": "1.0.0",
         "template_config": {
-            "conversation": {
-                "continuous": True,
-                "historyLength": 10,
-            },
+            "response_prefix": "Test: ",
+            "system_prompt": "You are a helpful test agent."
         },
         "system_prompt": "You are a helpful test agent.",
-        "llm_config_id": "test-llm-config",
+        "llm_config_id": "test-mock",
     }
     
     # Create the agent
-    create_response = client.post("/v1/agents", json=agent_data, headers=auth_headers)
+    create_response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     assert create_response.status_code == 201
     
     # Execute the agent using OpenAI-compatible format
@@ -174,7 +165,7 @@ def test_execute_agent(client, auth_headers):
     assert "total_tokens" in usage
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_execute_nonexistent_agent(client, auth_headers):
     """Test execution of non-existent agent."""
     execution_data = {
@@ -191,7 +182,7 @@ def test_execute_nonexistent_agent(client, auth_headers):
     assert response.status_code == 404
 
 
-@patch("runtime.config.settings.runtime_token", "test-token") 
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_execute_agent_streaming(client, auth_headers):
     """Test agent execution with streaming response."""
     # First create an agent
@@ -199,15 +190,17 @@ def test_execute_agent_streaming(client, auth_headers):
         "id": "test-agent-streaming",
         "name": "Test Streaming Agent",
         "template_id": "simple-test",
+        "template_version_id": "1.0.0",
         "template_config": {
             "response_prefix": "Test: ",
             "system_prompt": "You are a helpful assistant."
         },
-        "system_prompt": "You are a helpful assistant."
+        "system_prompt": "You are a helpful assistant.",
+        "llm_config_id": "test"
     }
     
     # Create the agent
-    create_response = client.post("/v1/agents", json=agent_data, headers=auth_headers)
+    create_response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     assert create_response.status_code == 201
     
     # Execute with streaming
@@ -230,100 +223,102 @@ def test_execute_agent_streaming(client, auth_headers):
 
 # === EXPANDED API TESTS FOR VALIDATION ERRORS AND EDGE CASES ===
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_create_agent_missing_required_fields(client, auth_headers):
     """Test agent creation with missing required fields."""
     # Missing name
     agent_data = {
         "id": "missing-name-agent",
-        "template_id": "test-template",
-        "template_version_id": "1.0.0"
+        "template_id": "simple-test",
+        "template_version_id": "1.0.0",
+        "llm_config_id": "test"
     }
-    
-    response = client.post("/v1/agents", json=agent_data, headers=auth_headers)
+
+    response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     assert response.status_code == 422  # Unprocessable Entity
     data = response.json()
     assert "detail" in data
-    
-    # Missing template_id
+
+    # Missing template
     agent_data = {
         "id": "missing-template-agent",
         "name": "Missing Template Agent",
-        "template_version_id": "1.0.0"
+        "llm_config_id": "test"
     }
-    
-    response = client.post("/v1/agents", json=agent_data, headers=auth_headers)
+
+    response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     assert response.status_code == 422
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_create_agent_invalid_field_types(client, auth_headers):
     """Test agent creation with invalid field types."""
     # Invalid temperature type
     agent_data = {
         "id": "invalid-temp-agent",
         "name": "Invalid Temp Agent",
-        "template_id": "test-template",
+        "template_id": "simple-test",
         "template_version_id": "1.0.0",
+        "llm_config_id": "test-mock",
         "template_config": {
-            "conversation": {
-                "temperature": "invalid"  # Should be float
-            }
+            "response_prefix": ["not a string"],
         }
     }
-    
-    response = client.post("/v1/agents", json=agent_data, headers=auth_headers)
+
+    response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     # Should either validate or handle gracefully
     assert response.status_code in [400, 422]
-    
+
     # Invalid metadata type
     agent_data = {
         "id": "invalid-metadata-agent",
         "name": "Invalid Metadata Agent",
-        "template_id": "test-template",
+        "template_id": "simple-test",
         "template_version_id": "1.0.0",
+        "llm_config_id": "test-mock",
         "metadata": "should-be-object"  # Should be object
     }
-    
-    response = client.post("/v1/agents", json=agent_data, headers=auth_headers)
+
+    response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     assert response.status_code in [400, 422]
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_create_agent_duplicate_id(client, auth_headers):
     """Test creating agent with duplicate ID."""
     agent_data = {
         "id": "duplicate-agent",
         "name": "First Agent",
-        "template_id": "test-template",
-        "template_version_id": "1.0.0"
+        "template_id": "simple-test",
+        "template_version_id": "1.0.0",
+        "llm_config_id": "test"
     }
-    
+
     # Create first agent
     response1 = client.post("/v1/agents", json=agent_data, headers=auth_headers)
     assert response1.status_code == 201
-    
+
     # Try to create second agent with same ID
     agent_data["name"] = "Second Agent"  # Different name, same ID
     response2 = client.post("/v1/agents", json=agent_data, headers=auth_headers)
     assert response2.status_code in [400, 409]  # Bad Request or Conflict
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_create_agent_with_invalid_template(client, auth_headers):
     """Test creating agent with non-existent template."""
     agent_data = {
         "id": "invalid-template-agent",
         "name": "Invalid Template Agent",
         "template_id": "non-existent-template",
-        "template_version_id": "1.0.0"
+        "llm_config_id": "test"
     }
-    
-    response = client.post("/v1/agents", json=agent_data, headers=auth_headers)
+
+    response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     assert response.status_code == 400  # Should validate template exists
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_chat_completions_missing_required_fields(client, auth_headers):
     """Test chat completions with missing required fields."""
     # Missing model
@@ -348,7 +343,7 @@ def test_chat_completions_missing_required_fields(client, auth_headers):
     assert response.status_code == 422
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_chat_completions_invalid_parameters(client, auth_headers):
     """Test chat completions with invalid parameters."""
     # Invalid temperature range
@@ -372,7 +367,7 @@ def test_chat_completions_invalid_parameters(client, auth_headers):
     assert response.status_code in [400, 422]
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_chat_completions_invalid_message_format(client, auth_headers):
     """Test chat completions with invalid message format."""
     # Missing role
@@ -418,7 +413,7 @@ def test_chat_completions_invalid_message_format(client, auth_headers):
     assert response.status_code == 422
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_chat_completions_empty_messages(client, auth_headers):
     """Test chat completions with empty messages array."""
     execution_data = {
@@ -433,9 +428,9 @@ def test_chat_completions_empty_messages(client, auth_headers):
 def test_missing_authentication_various_endpoints(client):
     """Test missing authentication on various endpoints."""
     endpoints = [
-        ("GET", "/v1/schema"),
+        ("GET", "/v1/templates/"),
         ("GET", "/v1/health"),
-        ("POST", "/v1/agents"),
+        ("POST", "/v1/agents/"),
         ("POST", "/v1/chat/completions")
     ]
     
@@ -459,26 +454,26 @@ def test_malformed_json_requests(client, auth_headers):
     assert response.status_code == 422
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_content_type_validation(client, auth_headers):
     """Test content type validation for POST requests."""
     agent_data = {
         "id": "content-type-test",
         "name": "Content Type Test",
-        "template_id": "test-template",
+        "template_id": "simple-test",
         "template_version_id": "1.0.0"
     }
     
     # Test with wrong content type
     response = client.post(
-        "/v1/agents",
-        data=str(agent_data),
+        "/v1/agents/",
+        content=str(agent_data),
         headers={**auth_headers, "Content-Type": "text/plain"}
     )
     assert response.status_code in [400, 415, 422]
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_large_request_payload(client, auth_headers):
     """Test handling of large request payloads."""
     # Create very large system prompt
@@ -487,35 +482,35 @@ def test_large_request_payload(client, auth_headers):
     agent_data = {
         "id": "large-payload-agent",
         "name": "Large Payload Agent",
-        "template_id": "test-template",
+        "template_id": "simple-test",
         "template_version_id": "1.0.0",
         "system_prompt": large_prompt
     }
     
-    response = client.post("/v1/agents", json=agent_data, headers=auth_headers)
+    response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     # Should either accept or reject gracefully
-    assert response.status_code in [201, 413, 422]  # Created, Payload Too Large, or Validation Error
+    assert response.status_code == 400 # Agent configuration is too large
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_unicode_and_special_characters(client, auth_headers):
     """Test handling of unicode and special characters."""
     agent_data = {
         "id": "unicode-test-agent",
         "name": "Unicode Test: 🤖 中文 العربية русский",
         "description": "Testing special chars: <>&\"'\n\t",
-        "template_id": "test-template",
+        "template_id": "simple-test",
         "template_version_id": "1.0.0",
         "system_prompt": "You are 🤖 multilingual: Hola, مرحبا, 你好, Привет"
     }
     
-    response = client.post("/v1/agents", json=agent_data, headers=auth_headers)
+    response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     assert response.status_code == 201
     data = response.json()
     assert data["success"] is True
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_boundary_values_temperature(client, auth_headers):
     """Test boundary values for temperature parameter."""
     # First create an agent
@@ -523,7 +518,8 @@ def test_boundary_values_temperature(client, auth_headers):
         "id": "boundary-test-agent",
         "name": "Boundary Test Agent",
         "template_id": "simple-test",
-        "template_version_id": "1.0.0"
+        "template_version_id": "1.0.0",
+        "llm_config_id": "test-mock"
     }
     client.post("/v1/agents", json=agent_data, headers=auth_headers)
     
@@ -552,14 +548,14 @@ def test_boundary_values_temperature(client, auth_headers):
     assert response.status_code in [400, 422]
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_various_http_methods_unsupported_endpoints(client, auth_headers):
     """Test unsupported HTTP methods on endpoints."""
     # Test unsupported methods
     unsupported_tests = [
-        ("DELETE", "/v1/schema"),
-        ("PUT", "/v1/schema"),
-        ("PATCH", "/v1/schema"),
+        ("DELETE", "/v1/templates/"),
+        ("PUT", "/v1/templates/"),
+        ("PATCH", "/v1/templates/"),
         ("DELETE", "/v1/agents"),
         ("PUT", "/v1/chat/completions"),
         ("PATCH", "/v1/chat/completions")
@@ -570,11 +566,10 @@ def test_various_http_methods_unsupported_endpoints(client, auth_headers):
         assert response.status_code == 405  # Method Not Allowed
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_concurrent_agent_creation(client, auth_headers):
     """Test concurrent agent creation requests."""
     import threading
-    import time
     
     results = []
     
@@ -582,10 +577,10 @@ def test_concurrent_agent_creation(client, auth_headers):
         agent_data = {
             "id": f"concurrent-{agent_id}",
             "name": f"Concurrent Agent {agent_id}",
-            "template_id": "test-template",
+            "template_id": "simple-test",
             "template_version_id": "1.0.0"
         }
-        response = client.post("/v1/agents", json=agent_data, headers=auth_headers)
+        response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
         results.append((agent_id, response.status_code))
     
     # Create multiple threads
@@ -608,7 +603,7 @@ def test_concurrent_agent_creation(client, auth_headers):
     assert success_count == 5  # All should succeed with different IDs
 
 
-@patch("runtime.config.settings.runtime_token", "test-token")
+@patch("runtime.settings.settings.runtime_token", "test-token")
 def test_error_response_format_consistency(client, auth_headers):
     """Test that error responses have consistent format."""
     # Test various error scenarios and ensure consistent response format

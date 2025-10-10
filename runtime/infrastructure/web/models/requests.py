@@ -1,10 +1,12 @@
 """Web layer request models - Infrastructure layer."""
 
-from typing import Optional
+from typing import Optional, Any, Self
+import uuid
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 from ....domain.value_objects.chat_message import MessageRole
-
+from ....domain.value_objects.agent_configuration import AgentConfiguration
+from ....domain.entities.agent import AgentStatus
 
 class AgentIdentityModel(BaseModel):
     """Model for core agent identity attributes."""
@@ -13,7 +15,6 @@ class AgentIdentityModel(BaseModel):
     name: str = Field(..., description="A human-readable name for the agent.")
     description: Optional[str] = Field(default=None, description="A brief description of the agent's purpose.")
     avatar_url: Optional[str] = Field(default=None, description="URL for the agent's avatar.")
-    type: Optional[str] = Field(default=None, description="Agent type")
     owner_id: Optional[str] = Field(default=None, description="Owner ID")
     status: str = Field(default="draft", description="Agent status")
     agent_line_id: Optional[str] = Field(default=None, description="Agent line ID")
@@ -86,11 +87,10 @@ class CreateAgentRequest(BaseModel):
     """
     
     # Core fields - following API specification
-    id: str = Field(..., description="Agent line ID (logical identifier)")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Agent line ID (logical identifier)")
     name: str = Field(..., description="Agent name")
     description: Optional[str] = Field(default=None, description="Agent description")
     avatar_url: Optional[str] = Field(default=None, description="Agent avatar URL")
-    type: str = Field(..., description="Agent type")
     
     # Template fields - following API specification
     template_id: str = Field(..., description="Template type identifier")
@@ -113,14 +113,13 @@ class CreateAgentRequest(BaseModel):
         description="Agent status: draft, submitted, pending, published, revoked (default: draft)"
     )
     
-    @model_validator(mode="before")
-    @classmethod
-    def set_agent_line_id_default(cls, values):
+    @model_validator(mode="after")
+    def set_agent_line_id_default(self) -> Self:
         # If agent_line_id is not provided, set it to id (agent_id)
-        if values.get("agent_line_id") is None and "id" in values:
-            values["agent_line_id"] = values["id"]
-        return values
-    
+        if self.agent_line_id is None:
+            self.agent_line_id = self.id
+        return self
+
     def get_identity(self) -> AgentIdentityModel:
         """Parse identity-related fields into AgentIdentityModel."""
         return AgentIdentityModel(
@@ -128,7 +127,6 @@ class CreateAgentRequest(BaseModel):
             name=self.name,
             description=self.description,
             avatar_url=self.avatar_url,
-            type=self.type,
             owner_id=self.owner_id,
             status=self.status,
             agent_line_id=self.agent_line_id,
@@ -180,8 +178,6 @@ class CreateAgentRequest(BaseModel):
         meta = {}
         if identity.description:
             meta["description"] = identity.description
-        if identity.type:
-            meta["type"] = identity.type
         if config.system_prompt:
             meta["system_prompt"] = config.system_prompt
         if config.llm_config_id:
@@ -245,6 +241,31 @@ class ListAgentsRequest(BaseModel):
     offset: int = Field(0, ge=0, description="Number of results to skip")
     
     model_config = ConfigDict(extra="forbid")
+
+class UpdateAgentRequest(BaseModel):
+    """Request to update an agent."""
+    
+    name: Optional[str] = Field(None, description="New name for the agent")
+    template_id: Optional[str] = Field(None, description="New template ID")
+    template_version: Optional[str] = Field(None, description="New template version")
+    configuration: Optional[dict[str, Any]] = Field(None, description="New agent configuration")
+    metadata: Optional[dict[str, Any]] = Field(None, description="New metadata")
+    
+    def get_agent_configuration(self) -> Optional[AgentConfiguration]:
+        """Convert configuration dict to AgentConfiguration if provided."""
+        if self.configuration:
+            return AgentConfiguration.from_dict(self.configuration)
+        return None
+
+
+class UpdateAgentStatusRequest(BaseModel):
+    """Request to update an agent's status."""
+    
+    status: str = Field(..., description="New status (active, inactive, archived)")
+    
+    def get_status(self) -> AgentStatus:
+        """Convert status string to AgentStatus enum."""
+        return AgentStatus(self.status)
 
 
 class ChatCompletionMessage(BaseModel):

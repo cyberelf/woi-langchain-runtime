@@ -6,6 +6,7 @@ import logging
 
 from ..dependencies import get_framework_executor
 from ...frameworks.executor_base import FrameworkExecutor
+from ..auth import runtime_auth
 
 router = APIRouter(prefix="/v1/templates", tags=["templates"])
 
@@ -15,7 +16,8 @@ logger = logging.getLogger(__name__)
 @router.get("/")
 async def list_templates(
     framework: Optional[str] = Query(None, description="Filter templates by framework"),
-    executor: FrameworkExecutor = Depends(get_framework_executor)
+    executor: FrameworkExecutor = Depends(get_framework_executor),
+    _: bool = Depends(runtime_auth)
 ):
     """List all available agent templates."""
     try:
@@ -41,7 +43,8 @@ async def list_templates(
 @router.get("/{template_id}")
 async def get_template(
     template_id: str,
-    executor: FrameworkExecutor = Depends(get_framework_executor)
+    executor: FrameworkExecutor = Depends(get_framework_executor),
+    _: bool = Depends(runtime_auth)
 ):
     """Get detailed information about a specific template."""
     templates = executor.get_templates()

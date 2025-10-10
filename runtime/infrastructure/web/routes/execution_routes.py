@@ -4,6 +4,8 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.responses import StreamingResponse
 from collections.abc import AsyncGenerator
+import time
+import uuid
 
 from ....application.commands.execute_agent_command import ExecuteAgentCommand
 from ....application.services.execute_agent_service import ExecuteAgentService
@@ -84,9 +86,17 @@ async def chat_completions(
             metadata=request.metadata
         )
         
+        # Check if agent exists before execution
+        agent_exists = await service.agent_exists(request.model)
+        if not agent_exists:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Agent {request.model} not found"
+            )
+
         # Handle streaming vs non-streaming
         logger.debug(f"🎯 Request routing - stream: {request.stream}, agent: {request.model}")
-        
+
         if request.stream:
             logger.info(f"🌊 Routing to streaming execution for agent: {request.model}")
             # Return streaming response with correct SSE format
@@ -103,14 +113,24 @@ async def chat_completions(
             logger.info(f"⚡ Routing to synchronous execution for agent: {request.model}")
             # Execute agent and get ExecutionResult
             execution_result = await service.execute(command)
-            
+
             logger.debug(f"📊 Execution completed - success: {execution_result.success}, "
                         f"tokens: {execution_result.total_tokens}, "
                         f"time: {execution_result.processing_time_ms}ms")
-            
-            # Convert core ExecutionResult to OpenAI-compatible response
+
+            # Handle execution result based on success status
+            if not execution_result.success:
+                error_message = execution_result.error or "Execution failed"
+
+                # For execution errors, return 400
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=error_message
+                )
+
+            # Convert successful execution result to OpenAI-compatible response
             response = _convert_execution_result_to_chat_completion(execution_result, request.model)
-            
+
             # FastAPI will automatically validate this against ChatCompletionResponse
             return response
         
@@ -130,7 +150,7 @@ async def chat_completions(
         )
         
     except Exception as e:
-        logger.error(f"Failed to execute agent: {e}")
+        logger.error(f"Failed to execute agent: {str(e)}")
         
         # Check if it's an agent not found error
         if "not found" in str(e).lower():
@@ -233,10 +253,7 @@ def _convert_execution_result_to_chat_completion(
     execution_result: ExecutionResult, 
     model_id: str
 ) -> ChatCompletionResponse:
-    """Convert core ExecutionResult to OpenAI-compatible ChatCompletionResponse."""
-    import time
-    import uuid
-    
+    """Convert core ExecutionResult to OpenAI-compatible ChatCompletionResponse."""    
     # Handle failed execution
     if not execution_result.success:
         error_message = execution_result.error or "Execution failed"

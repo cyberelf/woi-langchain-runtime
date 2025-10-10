@@ -3,6 +3,8 @@
 import pytest
 from unittest.mock import AsyncMock
 
+import pytest_asyncio
+
 from runtime.infrastructure.message_queues.in_memory import InMemoryMessageQueue
 from runtime.core.agent_orchestrator import AgentOrchestrator, AgentMessageRequest, MessageType
 from runtime.domain.value_objects.chat_message import ChatMessage, MessageRole
@@ -11,7 +13,7 @@ from runtime.domain.value_objects.agent_configuration import AgentConfiguration
 from runtime.infrastructure.unit_of_work.in_memory_uow import TransactionalInMemoryUnitOfWork
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def orchestrator_setup():
     """Create orchestrator with real dependencies for integration testing."""
     message_queue = InMemoryMessageQueue()

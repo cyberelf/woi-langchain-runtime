@@ -10,10 +10,9 @@ from .workflow import WorkflowAgent
 
 # Template registry for this framework
 _TEMPLATE_CLASSES = {
-    "simple-test": SimpleTestAgent,
-    "workflow": WorkflowAgent,
+    SimpleTestAgent.template_id: SimpleTestAgent,
+    WorkflowAgent.template_id: WorkflowAgent,
 }
-
 
 def get_langgraph_templates() -> list[dict]:
     """Get list of available LangGraph templates with metadata."""
@@ -23,10 +22,10 @@ def get_langgraph_templates() -> list[dict]:
         try:
             # Get template metadata
             metadata = {
-                "template_id": template_id,
-                "template_name": getattr(template_class, 'template_name', template_id),
-                "template_version": getattr(template_class, 'template_version', '1.0.0'),
-                "description": getattr(template_class, 'template_description', ''),
+                "template_id": template_class.template_id,
+                "template_name": template_class.template_name,
+                "template_version": template_class.template_version,
+                "description": template_class.template_description,
                 "framework": "langgraph",
                 "class": template_class,
             }

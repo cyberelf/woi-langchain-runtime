@@ -5,6 +5,8 @@ import uuid
 from typing import Any
 from collections.abc import AsyncGenerator
 
+from runtime.settings import settings
+
 from ...core.executors import ExecutionResult, StreamingChunk
 from ...core.agent_orchestrator import (
     AgentOrchestrator, 
@@ -29,6 +31,10 @@ class ExecuteAgentService:
     
     def __init__(self, orchestrator: AgentOrchestrator):
         self.orchestrator = orchestrator
+
+    async def agent_exists(self, agent_id: str) -> bool:
+        """Check if an agent exists in the repository."""
+        return await self.orchestrator.agent_exists(agent_id)
     
     async def execute(self, command: ExecuteAgentCommand) -> ExecutionResult:
         """Execute an agent and return core ExecutionResult.
@@ -70,7 +76,7 @@ class ExecuteAgentService:
         logger.debug(f"Submitted message {message_id} for agent {command.agent_id} in task {task_id}")
         
         # Wait for result (with timeout)
-        timeout_seconds = getattr(command, 'timeout_seconds', 300)  # 5 minutes default
+        timeout_seconds = settings.agent_execution_timeout
         logger.debug(f"⏳ Waiting for result with {timeout_seconds}s timeout...")
         
         execution_result = await self.orchestrator.get_message_result(message_id, timeout_seconds)
@@ -105,7 +111,7 @@ class ExecuteAgentService:
             logger.debug(f"📊 Result details - {execution_result}")
         else:
             logger.error(f"❌ Agent execution failed: {command.agent_id}, "
-                        f"error: {execution_result.error}",
+                        f"error: {execution_result.error}"
                         f"details: {execution_result}")
         
         return execution_result

@@ -1,5 +1,6 @@
 """Unit tests for CreateAgentService."""
 
+import uuid
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -55,7 +56,7 @@ class TestCreateAgentService:
             configuration=sample_configuration,
             template_version="1.0.0",
             metadata={"test": "data"},
-            agent_id="test-agent-123"
+            agent_id=f"test-agent-{uuid.uuid4()}"
         )
 
     @pytest.mark.asyncio
@@ -63,6 +64,7 @@ class TestCreateAgentService:
         """Test successful agent creation."""
         # Setup mocks
         mock_uow.agents.get_by_name.return_value = None  # No existing agent
+        mock_uow.agents.get_by_id.return_value = None  # No existing agent
         
         with patch('runtime.domain.services.agent_validation_service.AgentValidationService') as mock_validation_service:
             mock_validation_service.return_value.validate_agent_configuration.return_value = []
@@ -75,7 +77,7 @@ class TestCreateAgentService:
             assert result.name == "Test Agent"
             assert result.template_id == "test-template"
             assert result.status == AgentStatus.CREATED
-            assert str(result.id) == "test-agent-123"
+            assert str(result.id) == sample_command.agent_id
             
             # Verify interactions
             mock_template_validator.template_exists.assert_called_once_with("test-template")
@@ -126,6 +128,7 @@ class TestCreateAgentService:
             configuration=sample_command.configuration
         )
         mock_uow.agents.get_by_name.return_value = existing_agent
+        mock_uow.agents.get_by_id.return_value = None
         
         with patch('runtime.domain.services.agent_validation_service.AgentValidationService') as mock_validation_service:
             mock_validation_service.return_value.validate_agent_configuration.return_value = []
@@ -141,6 +144,8 @@ class TestCreateAgentService:
     async def test_execute_database_error_rollback(self, service, sample_command, mock_uow, mock_template_validator):
         """Test that database errors trigger rollback."""
         mock_uow.agents.get_by_name.return_value = None
+        mock_uow.agents.get_by_id.return_value = None
+
         # Simulate database error during save
         mock_uow.agents.save.side_effect = Exception("Database error")
         
@@ -210,6 +215,7 @@ class TestCreateAgentService:
     async def test_logging_info_messages(self, service, sample_command, mock_uow, mock_template_validator):
         """Test that info logging messages are generated."""
         mock_uow.agents.get_by_name.return_value = None
+        mock_uow.agents.get_by_id.return_value = None
         
         with patch('runtime.domain.services.agent_validation_service.AgentValidationService') as mock_validation_service:
             mock_validation_service.return_value.validate_agent_configuration.return_value = []
@@ -242,7 +248,8 @@ class TestCreateAgentService:
     async def test_template_configuration_passed_correctly(self, service, sample_command, mock_uow, mock_template_validator):
         """Test that template configuration is correctly passed to validator."""
         mock_uow.agents.get_by_name.return_value = None
-        
+        mock_uow.agents.get_by_id.return_value = None
+
         with patch('runtime.domain.services.agent_validation_service.AgentValidationService') as mock_validation_service:
             mock_validation_service.return_value.validate_agent_configuration.return_value = []
             

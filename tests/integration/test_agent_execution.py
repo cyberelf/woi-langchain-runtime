@@ -628,7 +628,7 @@ async def test_streaming_execution_concurrent_sessions():
         assert len(results) == 3, "Should have results for all 3 sessions"
 
         for i, result in enumerate(results):
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 print(f"Session {sessions[i]} failed with error: {result}")
                 assert False, f"Session {sessions[i]} should not fail"
             else:
