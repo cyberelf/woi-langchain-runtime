@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..repositories.agent_repository import AgentRepositoryInterface
-    from ..repositories.session_repository import SessionRepositoryInterface
+    from ..repositories.task_repository import TaskRepositoryInterface
 
 
 class UnitOfWorkInterface(ABC):
@@ -18,7 +18,7 @@ class UnitOfWorkInterface(ABC):
     # Repository properties (type hints for implementations)
     if TYPE_CHECKING:
         agents: "AgentRepositoryInterface"
-        sessions: "SessionRepositoryInterface"
+        tasks: "TaskRepositoryInterface"
     
     @abstractmethod
     async def commit(self) -> None:

@@ -74,7 +74,7 @@ async def test_execute_agent():
                     content="Hello, test message"
                 )
             ],
-            session_id="test-session",
+            task_id="test-task",
             user_id="test-user",
             stream=False,
             temperature=0.7,
@@ -151,7 +151,7 @@ async def test_streaming_execution_basic():
                     content="Hello, please respond with a streaming response"
                 )
             ],
-            session_id="test-streaming-session",
+            task_id="test-streaming-task",
             user_id="test-user",
             stream=True,
             temperature=0.7,
@@ -250,7 +250,7 @@ async def test_streaming_execution_multiple_chunks():
             messages=[
                 ChatMessage(role=MessageRole.USER, content="Test multiple chunks")
             ],
-            session_id="multi-chunk-session",
+            task_id="multi-chunk-task",
             user_id="test-user",
             stream=True
         )
@@ -273,7 +273,7 @@ async def test_streaming_execution_multiple_chunks():
             assert chunk.chunk_index == i
             assert chunk.metadata.get('agent_id') == str(agent.id.value)
             assert chunk.message_id is not None
-            assert chunk.task_id == "multi-chunk-session"
+            assert chunk.task_id == "multi-chunk-task"
 
         print(f"Multi-chunk test: {len(chunks)} chunks received")
 
@@ -338,7 +338,7 @@ async def test_streaming_execution_error_handling():
             messages=[
                 ChatMessage(role=MessageRole.USER, content="Test error handling")
             ],
-            session_id="error-session",
+            task_id="error-task",
             user_id="test-user",
             stream=True
         )
@@ -420,7 +420,7 @@ async def test_streaming_execution_with_timeout():
             messages=[
                 ChatMessage(role=MessageRole.USER, content="Test timeout")
             ],
-            session_id="timeout-session",
+            task_id="timeout-task",
             user_id="test-user",
             stream=True
         )
@@ -461,10 +461,10 @@ async def test_streaming_execution_metadata():
             content="Response with metadata",
             chunk_index=0,
             finish_reason="stop",
+            task_id=metadata.get('task_id'),
+            context_id=metadata.get('context_id'),
             metadata={
                 'test_metadata': 'test_value',
-                'session_info': metadata.get('task_id'),
-                'user_info': metadata.get('user_id')
             }
         )
 
@@ -512,7 +512,7 @@ async def test_streaming_execution_metadata():
             messages=[
                 ChatMessage(role=MessageRole.USER, content="Test metadata")
             ],
-            session_id="metadata-session",
+            task_id="metadata-task",
             user_id="test-user",
             stream=True,
             metadata={
@@ -533,7 +533,7 @@ async def test_streaming_execution_metadata():
         assert chunk.metadata.get('agent_id') == str(agent.id.value)
         assert chunk.metadata.get('context_id') == 'test-context'
         assert chunk.metadata.get('chunk_number') == 1
-        assert chunk.task_id == "metadata-session"
+        assert chunk.task_id == "metadata-task"
         assert chunk.message_id is not None
 
         print(f"Metadata test: chunk metadata keys: {list(chunk.metadata.keys())}")
@@ -544,18 +544,18 @@ async def test_streaming_execution_metadata():
 
 
 @pytest.mark.asyncio
-async def test_streaming_execution_concurrent_sessions():
-    """Test streaming execution with concurrent sessions."""
+async def test_streaming_execution_concurrent_tasks():
+    """Test streaming execution with concurrent tasks."""
     # Mock framework executor
     mock_framework_executor = MagicMock()
     mock_agent_executor = AsyncMock()
 
     async def mock_stream_execute_concurrent(*args, **kwargs):
         metadata = kwargs.get('metadata', {})
-        session_id = metadata.get('task_id', 'unknown')
+        task_id = metadata.get('task_id', 'unknown')
 
         yield StreamingChunk(
-            content=f"Response for {session_id}",
+            content=f"Response for {task_id}",
             chunk_index=0,
             finish_reason="stop"
         )
@@ -600,16 +600,16 @@ async def test_streaming_execution_concurrent_sessions():
         service = ExecuteAgentService(orchestrator)
 
         # Create multiple concurrent streaming requests
-        sessions = ['session-1', 'session-2', 'session-3']
+        task_ids = ['task-1', 'task-2', 'task-3']
         tasks = []
 
-        for session_id in sessions:
+        for task_id in task_ids:
             command = ExecuteAgentCommand(
                 agent_id=str(agent.id.value),
                 messages=[
-                    ChatMessage(role=MessageRole.USER, content=f"Test {session_id}")
+                    ChatMessage(role=MessageRole.USER, content=f"Test {task_id}")
                 ],
-                session_id=session_id,
+                task_id=task_id,
                 user_id="test-user",
                 stream=True
             )
@@ -624,19 +624,19 @@ async def test_streaming_execution_concurrent_sessions():
 
         results = await asyncio.gather(*[collect_chunks(stream) for stream in tasks], return_exceptions=True)
 
-        # Verify all sessions received responses
-        assert len(results) == 3, "Should have results for all 3 sessions"
+        # Verify all tasks received responses
+        assert len(results) == 3, "Should have results for all 3 tasks"
 
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
-                print(f"Session {sessions[i]} failed with error: {result}")
-                assert False, f"Session {sessions[i]} should not fail"
+                print(f"Task {task_ids[i]} failed with error: {result}")
+                assert False, f"Task {task_ids[i]} should not fail"
             else:
-                assert len(result) == 1, f"Session {sessions[i]} should receive one chunk"
-                assert sessions[i] in result[0].content, f"Content should reference session {sessions[i]}"
-                assert result[0].task_id == sessions[i], f"Task ID should match session {sessions[i]}"
+                assert len(result) == 1, f"Task {task_ids[i]} should receive one chunk"
+                assert task_ids[i] in result[0].content, f"Content should reference task {task_ids[i]}"
+                assert result[0].task_id == task_ids[i], f"Task ID should match task {task_ids[i]}"
 
-        print(f"Concurrent test: {len(sessions)} sessions completed successfully")
+        print(f"Concurrent test: {len(task_ids)} tasks completed successfully")
 
     finally:
         await orchestrator.shutdown()
@@ -698,7 +698,7 @@ async def test_streaming_execution_empty_response():
             messages=[
                 ChatMessage(role=MessageRole.USER, content="Test empty response")
             ],
-            session_id="empty-session",
+            task_id="empty-task",
             user_id="test-user",
             stream=True
         )
@@ -713,7 +713,7 @@ async def test_streaming_execution_empty_response():
         assert chunks[0].content == "", "Content should be empty"
         assert chunks[0].finish_reason == "stop", "Should have finish reason"
         assert chunks[0].message_id is not None, "Should have message ID"
-        assert chunks[0].task_id == "empty-session", "Should have task ID"
+        assert chunks[0].task_id == "empty-task", "Should have task ID"
 
         print(f"Empty response test: handled empty content gracefully")
 

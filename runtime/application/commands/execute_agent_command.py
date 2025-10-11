@@ -22,7 +22,8 @@ class ExecuteAgentCommand:
     presence_penalty: Optional[float] = None
     stream: bool = False
     stop: Optional[List[str]] = None
-    session_id: Optional[str] = None
+    task_id: Optional[str] = None
+    context_id: Optional[str] = None
     user_id: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     
@@ -36,3 +37,14 @@ class ExecuteAgentCommand:
             raise ValueError("Temperature must be between 0.0 and 2.0")
         if self.max_tokens is not None and self.max_tokens <= 0:
             raise ValueError("max_tokens must be positive")
+        if self.task_id is not None:
+            if not isinstance(self.task_id, str):
+                raise ValueError("task_id must be a string")
+            if not self.task_id.strip():
+                raise ValueError("task_id cannot be empty or whitespace")
+                
+        if self.context_id is not None:
+            if not isinstance(self.context_id, str):
+                raise ValueError("context_id must be a string")
+            if not self.context_id.strip():
+                raise ValueError("context_id cannot be empty or whitespace")

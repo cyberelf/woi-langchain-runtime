@@ -337,7 +337,7 @@ class BaseLangGraphAgent(ABC):
             )
             
         except Exception as e:
-            logger.error(f"❌ LangGraph streaming failed: {self.template_id}: {e}")
+            logger.exception(f"❌ LangGraph streaming failed: {self.template_id}: {e}")
             # Yield error chunk
             yield StreamingChunk(
                 content="",

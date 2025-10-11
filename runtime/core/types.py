@@ -6,8 +6,7 @@ clear semantics for core concepts.
 """
 
 from enum import Enum
-from typing import Any, Dict, List, NewType, Optional, Union
-from uuid import UUID
+from typing import Any, Dict, NewType, Union
 
 # Import domain objects that are needed by core types
 from ..domain.value_objects.chat_message import ChatMessage, MessageRole
@@ -15,7 +14,8 @@ from ..domain.value_objects.chat_message import ChatMessage, MessageRole
 
 # Core ID types for type safety
 AgentId = NewType("AgentId", str)
-SessionId = NewType("SessionId", str) 
+TaskId = NewType("TaskId", str)
+ContextId = NewType("ContextId", str)
 TemplateId = NewType("TemplateId", str)
 ToolsetId = NewType("ToolsetId", str)
 UserId = NewType("UserId", str)
@@ -72,7 +72,7 @@ ErrorResponse = Dict[str, Union[str, int, ErrorDetails]]
 # Export all public types
 __all__ = [
     # Core ID types
-    "AgentId", "SessionId", "TemplateId", "ToolsetId", "UserId",
+    "AgentId", "TaskId", "ContextId", "TemplateId", "ToolsetId", "UserId",
     # Enums
     "ComponentStatus", "LogLevel", "Environment",
     # Domain objects

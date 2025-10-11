@@ -81,7 +81,8 @@ async def chat_completions(
             presence_penalty=request.presence_penalty,
             stream=request.stream,
             stop=request.stop,
-            session_id=request.get_session_id(),
+            task_id=request.get_task_id(),
+            context_id=request.get_context_id(),
             user_id=request.get_user_id(),
             metadata=request.metadata
         )
@@ -176,7 +177,7 @@ async def _stream_chat_completion(
     logger.info(f"🌊 Starting SSE stream for agent {command.agent_id} "
                f"(completion_id: {completion_id})")
     logger.debug(f"🔍 Stream request details - messages: {len(command.messages)}, "
-                f"session: {command.session_id}")
+                f"task: {command.task_id}")
     
     chunk_count = 0
     total_content_length = 0

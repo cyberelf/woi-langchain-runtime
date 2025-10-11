@@ -207,15 +207,21 @@ class ExecuteAgentRequest(BaseModel):
     temperature: Optional[float] = Field(None, ge=0.0, le=2.0, description="Sampling temperature")
     max_tokens: Optional[int] = Field(None, gt=0, description="Maximum tokens to generate")
     stream: bool = Field(False, description="Enable streaming response")
-    metadata: Optional[dict] = Field(None, description="Request metadata including session_id, user_id")
+    metadata: Optional[dict] = Field(None, description="Request metadata including task_id, context_id, user_id")
     
     model_config = ConfigDict(extra="forbid")
     
-    def get_session_id(self) -> Optional[str]:
-        """Extract session ID from metadata."""
-        if self.metadata:
-            return self.metadata.get("session_id")
-        return None
+    def get_task_id(self) -> Optional[str]:
+        """Extract task identifier from metadata."""
+        if not self.metadata:
+            return None
+        return self.metadata.get("task_id")
+
+    def get_context_id(self) -> Optional[str]:
+        """Extract context identifier from metadata."""
+        if not self.metadata:
+            return None
+        return self.metadata.get("context_id")
     
     def get_user_id(self) -> Optional[str]:
         """Extract user ID from metadata."""
@@ -290,15 +296,21 @@ class ChatCompletionRequest(BaseModel):
     presence_penalty: Optional[float] = Field(None, ge=-2.0, le=2.0, description="Presence penalty")
     stream: bool = Field(False, description="Enable streaming response")
     stop: Optional[list[str]] = Field(None, description="Stop sequences")
-    metadata: Optional[dict] = Field(None, description="Request metadata including session_id, user_id")
+    metadata: Optional[dict] = Field(None, description="Request metadata including task_id, context_id, user_id")
     
     model_config = ConfigDict(extra="forbid")
     
-    def get_session_id(self) -> Optional[str]:
-        """Extract session ID from metadata."""
-        if self.metadata:
-            return self.metadata.get("session_id")
-        return None
+    def get_task_id(self) -> Optional[str]:
+        """Extract task identifier from metadata."""
+        if not self.metadata:
+            return None
+        return self.metadata.get("task_id")
+
+    def get_context_id(self) -> Optional[str]:
+        """Extract context identifier from metadata."""
+        if not self.metadata:
+            return None
+        return self.metadata.get("context_id")
     
     def get_user_id(self) -> Optional[str]:
         """Extract user ID from metadata."""

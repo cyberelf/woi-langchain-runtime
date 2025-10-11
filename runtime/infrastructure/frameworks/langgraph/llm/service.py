@@ -9,8 +9,8 @@ import logging
 
 # Removed domain abstraction - using concrete implementation
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import BaseMessage, AIMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.messages import BaseMessage, AIMessage, AIMessageChunk
+from langchain_core.outputs import ChatGeneration, ChatResult, ChatGenerationChunk
 from langchain_deepseek import ChatDeepSeek
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
@@ -54,9 +54,8 @@ class TestChatModel(BaseChatModel):
         words = test_response.split()
         for i, word in enumerate(words):
             content = word + (" " if i < len(words) - 1 else "")
-            message = AIMessage(content=content)
-            yield ChatGeneration(message=message)
-
+            message = AIMessageChunk(content=content)
+            yield ChatGenerationChunk(message=message)
 
 @dataclass
 class LLMConfiguration:

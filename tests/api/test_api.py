@@ -172,7 +172,8 @@ async def test_execute_agent(async_client, auth_headers):
         "max_tokens": 100,
         "stream": False,
         "metadata": {
-            "session_id": "test-session-123",
+            "task_id": "test-task-123",
+            "context_id": "ctx-456",
             "user_id": "test-user-456"
         }
     }

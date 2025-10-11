@@ -30,7 +30,8 @@ class TestExecuteAgentCommand:
             presence_penalty=0.3,
             stream=True,
             stop=["<END>", "\n\n"],
-            session_id="session-456",
+            task_id="task-456",
+            context_id="ctx-789",
             user_id="user-789",
             metadata={"context": "test", "priority": "high"}
         )
@@ -44,7 +45,8 @@ class TestExecuteAgentCommand:
         assert command.presence_penalty == 0.3
         assert command.stream is True
         assert command.stop == ["<END>", "\n\n"]
-        assert command.session_id == "session-456"
+        assert command.task_id == "task-456"
+        assert command.context_id == "ctx-789"
         assert command.user_id == "user-789"
         assert command.metadata == {"context": "test", "priority": "high"}
 
@@ -64,7 +66,8 @@ class TestExecuteAgentCommand:
         assert command.presence_penalty is None
         assert command.stream is False  # Default value
         assert command.stop is None
-        assert command.session_id is None
+        assert command.task_id is None
+        assert command.context_id is None
         assert command.user_id is None
         assert command.metadata is None
 
@@ -236,16 +239,18 @@ class TestExecuteAgentCommand:
 
         assert command.top_p == 0.95
 
-    def test_with_session_and_user_context(self, sample_messages):
-        """Test command with session and user context."""
+    def test_with_task_and_user_context(self, sample_messages):
+        """Test command with task and user context."""
         command = ExecuteAgentCommand(
             agent_id="context-agent",
             messages=sample_messages,
-            session_id="conversation-session-123",
+            task_id="conversation-task-123",
+            context_id="context-999",
             user_id="user-profile-456"
         )
 
-        assert command.session_id == "conversation-session-123"
+        assert command.task_id == "conversation-task-123"
+        assert command.context_id == "context-999"
         assert command.user_id == "user-profile-456"
 
     def test_with_complex_metadata(self, sample_messages):
@@ -315,3 +320,20 @@ class TestExecuteAgentCommand:
         assert command.messages[2].content == "Third"
         assert command.messages[3].content == "Fourth"
 
+    def test_validation_task_id_not_string(self, sample_messages):
+        """Test task_id validation rejects non-string values."""
+        with pytest.raises(ValueError, match="task_id must be a string"):
+            ExecuteAgentCommand(
+                agent_id="test-agent",
+                messages=sample_messages,
+                task_id=12345  # type: ignore
+            )
+
+    def test_validation_context_id_not_string(self, sample_messages):
+        """Test context_id validation rejects non-string values."""
+        with pytest.raises(ValueError, match="context_id must be a string"):
+            ExecuteAgentCommand(
+                agent_id="test-agent",
+                messages=sample_messages,
+                context_id={"invalid": "dict"}  # type: ignore
+            )

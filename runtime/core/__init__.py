@@ -31,7 +31,8 @@ from .exceptions import (
 )
 from .types import (
     AgentId,
-    SessionId,
+    TaskId,
+    ContextId,
     TemplateId,
     ToolsetId,
     UserId,
@@ -69,7 +70,8 @@ __all__ = [
     "TimeoutError",
     # Types
     "AgentId",
-    "SessionId",
+    "TaskId",
+    "ContextId",
     "TemplateId",
     "ToolsetId", 
     "UserId",

@@ -4,7 +4,7 @@ from typing import Optional
 
 from ...domain.unit_of_work.unit_of_work import UnitOfWorkInterface
 from ..repositories.in_memory_agent_repository import InMemoryAgentRepository
-from ..repositories.in_memory_session_repository import InMemorySessionRepository
+from ..repositories.in_memory_task_repository import InMemoryTaskRepository
 
 
 class InMemoryUnitOfWork(UnitOfWorkInterface):
@@ -16,7 +16,7 @@ class InMemoryUnitOfWork(UnitOfWorkInterface):
     
     def __init__(self):
         self.agents = InMemoryAgentRepository()
-        self.sessions = InMemorySessionRepository()
+        self.tasks = InMemoryTaskRepository()
         self._committed = False
         self._rolled_back = False
     
@@ -78,14 +78,14 @@ class TransactionalInMemoryUnitOfWork(UnitOfWorkInterface):
         # Shared repositories for all UoW instances
         if not hasattr(TransactionalInMemoryUnitOfWork, '_shared_agent_repo'):
             TransactionalInMemoryUnitOfWork._shared_agent_repo = InMemoryAgentRepository()
-            TransactionalInMemoryUnitOfWork._shared_session_repo = InMemorySessionRepository()
+            TransactionalInMemoryUnitOfWork._shared_task_repo = InMemoryTaskRepository()
         
         self.agents = TransactionalInMemoryUnitOfWork._shared_agent_repo
-        self.sessions = TransactionalInMemoryUnitOfWork._shared_session_repo
+        self.tasks = TransactionalInMemoryUnitOfWork._shared_task_repo
         
         # Transaction state
         self._agent_snapshot: Optional[dict] = None
-        self._session_snapshot: Optional[dict] = None
+        self._task_snapshot: Optional[dict] = None
         self._committed = False
         self._rolled_back = False
     
@@ -96,7 +96,7 @@ class TransactionalInMemoryUnitOfWork(UnitOfWorkInterface):
         
         # Clear snapshots since we're committing
         self._agent_snapshot = None
-        self._session_snapshot = None
+        self._task_snapshot = None
         self._committed = True
     
     async def rollback(self) -> None:
@@ -106,18 +106,18 @@ class TransactionalInMemoryUnitOfWork(UnitOfWorkInterface):
         
         # Restore from snapshots
         if self._agent_snapshot is not None:
-            self.agents._agents = self._agent_snapshot.copy()
-        
-        if self._session_snapshot is not None:
-            self.sessions._sessions = self._session_snapshot.copy()
+            self.agents._agents = self._agent_snapshot.copy()  # type: ignore[attr-defined]
+
+        if self._task_snapshot is not None:
+            self.tasks._tasks = self._task_snapshot.copy()  # type: ignore[attr-defined]
         
         self._rolled_back = True
     
     async def __aenter__(self):
         """Enter async context manager."""
         # Take snapshots for potential rollback
-        self._agent_snapshot = self.agents._agents.copy()
-        self._session_snapshot = self.sessions._sessions.copy()
+        self._agent_snapshot = self.agents._agents.copy()  # type: ignore[attr-defined]
+        self._task_snapshot = self.tasks._tasks.copy()  # type: ignore[attr-defined]
         
         self._committed = False
         self._rolled_back = False

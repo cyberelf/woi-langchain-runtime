@@ -43,7 +43,8 @@ class TestExecuteAgentService:
             messages=sample_messages,
             temperature=0.7,
             max_tokens=1000,
-            session_id="test-session",
+            task_id="test-task",
+            context_id="test-context",
             user_id="test-user",
             stream=False,
             metadata={"context": "test"}
@@ -55,7 +56,7 @@ class TestExecuteAgentService:
         return ExecutionResult(
             success=True,
             agent_id="test-agent-123",
-            task_id="test-session",
+            task_id="test-task",
             message="Test response from agent",
             metadata={"tokens_used": 50}
         )
@@ -75,7 +76,7 @@ class TestExecuteAgentService:
         # Verify result
         assert isinstance(result, ExecutionResult)
         assert result.agent_id == "test-agent-123"
-        assert result.task_id == "test-session"
+        assert result.task_id == "test-task"
         assert result.message == "Test response from agent"
         assert result.success is True
         
@@ -91,7 +92,8 @@ class TestExecuteAgentService:
         assert call_args.messages == sample_command.messages
         assert call_args.temperature == 0.7
         assert call_args.max_tokens == 1000
-        assert call_args.task_id == "test-session"  # session_id maps to task_id
+        assert call_args.task_id == "test-task"
+        assert call_args.context_id == "test-context"
         assert call_args.user_id == "test-user"
         assert call_args.metadata == {"context": "test"}
 
@@ -99,11 +101,11 @@ class TestExecuteAgentService:
     async def test_execute_with_generated_task_id(
         self, service, mock_orchestrator, sample_execution_result, sample_messages
     ):
-        """Test execution with generated task_id when session_id is None."""
+        """Test execution with generated task_id when not provided."""
         command = ExecuteAgentCommand(
             agent_id="test-agent-456",
             messages=sample_messages,
-            session_id=None  # No session_id provided
+            task_id=None
         )
         
         # Setup mocks
@@ -117,7 +119,7 @@ class TestExecuteAgentService:
             
             # Verify UUID was generated for task_id
             mock_uuid.assert_called()
-            
+
             # Verify the generated UUID was used as task_id
             call_args = mock_orchestrator.submit_message.call_args[0][0]
             assert call_args.task_id == "generated-uuid-123"
@@ -369,7 +371,8 @@ class TestExecuteAgentService:
         assert call_args.messages == sample_command.messages
         assert call_args.temperature == sample_command.temperature
         assert call_args.max_tokens == sample_command.max_tokens
-        assert call_args.task_id == sample_command.session_id  # session_id maps to task_id
+        assert call_args.task_id == sample_command.task_id
+        assert call_args.context_id == sample_command.context_id
         assert call_args.user_id == sample_command.user_id
         assert call_args.metadata == sample_command.metadata
         

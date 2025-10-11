@@ -5,6 +5,7 @@ import uuid
 from typing import Any
 from collections.abc import AsyncGenerator
 
+from runtime.domain.value_objects import context_id
 from runtime.settings import settings
 
 from ...core.executors import ExecutionResult, StreamingChunk
@@ -47,10 +48,8 @@ class ExecuteAgentService:
         """
         logger.info(f"🚀 Executing agent: {command.agent_id}")
         
-        # Generate server-side task_id if this is a stateful conversation
-        # The command may already have a task_id from a previous message in the same conversation
-        task_id = command.session_id or str(uuid.uuid4())  # For now, map session_id to task_id
-        logger.debug(f"🆔 Task ID assigned: {task_id} (session: {command.session_id})")
+        # Generate server-side task_id if caller did not supply one
+        task_id, context_id = self._resolve_identifiers(command)
         
         # Create message request (A2A Message)
         correlation_id = str(uuid.uuid4())
@@ -58,7 +57,7 @@ class ExecuteAgentService:
             agent_id=command.agent_id,
             messages=command.messages,
             task_id=task_id,  # Stateful conversation ID
-            context_id=command.metadata.get('context_id') if command.metadata else None,
+            context_id=context_id,
             user_id=command.user_id,
             stream=False,  # Non-streaming execution
             temperature=command.temperature or 0.7,
@@ -120,9 +119,8 @@ class ExecuteAgentService:
         """Execute an agent with streaming response, returning core StreamingChunk objects."""
         logger.info(f"Streaming execution for agent: {command.agent_id}")
         
-        # Generate server-side task_id for stateful conversation  
-        task_id = command.session_id or str(uuid.uuid4())
-        logger.debug(f"🆔 Streaming task ID assigned: {task_id} (session: {command.session_id})")
+        # Generate server-side task_id for stateful conversation
+        task_id, context_id = self._resolve_identifiers(command)
         
         # Create streaming message request (A2A Message)
         correlation_id = str(uuid.uuid4())
@@ -130,7 +128,7 @@ class ExecuteAgentService:
             agent_id=command.agent_id,
             messages=command.messages,
             task_id=task_id,  # Stateful conversation ID
-            context_id=command.metadata.get('context_id') if command.metadata else None,
+            context_id=context_id,
             user_id=command.user_id,
             stream=True,  # Force streaming
             temperature=command.temperature or 0.7,
@@ -166,7 +164,7 @@ class ExecuteAgentService:
                 # Add service-specific metadata to the domain model
                 chunk.metadata.update({
                     'agent_id': command.agent_id,
-                    'context_id': command.metadata.get('context_id') if command.metadata else None,
+                    'context_id': context_id,
                     'chunk_number': chunk_count,
                 })
 
@@ -217,3 +215,16 @@ class ExecuteAgentService:
             "running_messages": len(self.orchestrator._running_messages),
             "message_queue_type": type(self.orchestrator.message_queue).__name__
         }
+
+    def _resolve_identifiers(self, command: ExecuteAgentCommand) -> tuple[str, str | None]:
+        """Extract or generate task_id and context_id from command with fallback to metadata."""
+        task_id = command.task_id or str(uuid.uuid4())
+        if not command.task_id and command.metadata:
+            task_id = command.metadata.get("task_id", task_id)
+        
+        context_id = command.context_id
+        if context_id is None and command.metadata:
+            context_id = command.metadata.get("context_id")
+        
+        logger.debug(f"🆔 Resolved identifiers - task: {task_id}, context: {context_id}")
+        return task_id, context_id
