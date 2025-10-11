@@ -472,7 +472,6 @@ class AgentOrchestrator:
         
         while self._running:
             try:
-                logger.debug(f"Worker {worker_id} waiting for messages...")
                 # Receive message from queue
                 message = await self.message_queue.receive_message(
                     queue_name=self.MESSAGE_QUEUE,

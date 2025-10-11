@@ -4,6 +4,7 @@ from openai import Stream
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from runtime import settings
 from runtime.application.services.execute_agent_service import ExecuteAgentService
 from runtime.application.commands.execute_agent_command import ExecuteAgentCommand
 from runtime.core.executors.interfaces import StreamingChunk
@@ -81,7 +82,7 @@ class TestExecuteAgentService:
         # Verify orchestrator was called correctly
         mock_orchestrator.submit_message.assert_called_once()
         mock_orchestrator.get_message_result.assert_called_once_with(
-            "test-message-id-123", 300
+            "test-message-id-123", settings.settings.agent_execution_timeout
         )
         
         # Check the AgentMessageRequest passed to submit_message

@@ -1,18 +1,50 @@
-"""Tests for API endpoints."""
+"""Tests for API endpoints.
+
+In-memory queue and orchestrator requires the event loop to be consistent, so that workers are scheduled correctly.
+The fastapi test client is a sync client and creates a new event loop for each request, which breaks this assumption.
+So we use an async client for these tests.
+Specifically, in-memory queue requires the same event loop for putting and getting messages from a specific queue, 
+and the orchestrator initialization, which creates background async worker, is tied to the event loop it was created in.
+"""
 
 from unittest.mock import patch
 
+import asyncio
 import pytest
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
+import pytest_asyncio
 
 from runtime.main import app
+from runtime.infrastructure.web.dependencies import (
+    shutdown_dependencies,
+    get_message_queue,
+    get_framework_executor,
+    get_unit_of_work,
+    get_agent_template_validator
+)
 
 
-@pytest.fixture
-def client():
-    """Test client fixture."""
-    return TestClient(app)
-
+@pytest_asyncio.fixture
+async def async_client():
+    """Async test client fixture with proper lifespan management."""
+    # Clear caches before starting a new test
+    get_message_queue.cache_clear()
+    get_framework_executor.cache_clear()
+    get_unit_of_work.cache_clear()
+    get_agent_template_validator.cache_clear()
+    
+    # Use the app with ASGI transport - this properly triggers lifespan events
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+    
+    # Cleanup: Shutdown dependencies after each test to avoid event loop issues
+    await shutdown_dependencies()
+    
+    # Clear caches after test
+    get_message_queue.cache_clear()
+    get_framework_executor.cache_clear()
+    get_unit_of_work.cache_clear()
+    get_agent_template_validator.cache_clear()
 
 @pytest.fixture
 def auth_headers():
@@ -20,35 +52,39 @@ def auth_headers():
     return {"X-Runtime-Token": "test-token"}
 
 
-def test_root_endpoint(client):
+@pytest.mark.asyncio
+async def test_root_endpoint(async_client):
     """Test root endpoint."""
-    response = client.get("/")
+    response = await async_client.get("/")
     assert response.status_code == 200
     data = response.json()
     assert data["service"] == "Agent Runtime Service"
     assert "version" in data
 
 
-def test_ping_endpoint(client):
+@pytest.mark.asyncio
+async def test_ping_endpoint(async_client):
     """Test ping endpoint."""
-    response = client.get("/ping")
+    response = await async_client.get("/ping")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ok"
     assert data["message"] == "pong"
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_get_schema(client, auth_headers):
+async def test_get_schema(async_client, auth_headers):
     """Test templates endpoint (replaces schema endpoint)."""
-    response = client.get("/v1/templates/", headers=auth_headers)
+    response = await async_client.get("/v1/templates/", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert "templates" in data
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_create_agent(client, auth_headers):
+async def test_create_agent(async_client, auth_headers):
     """Test agent creation."""
     agent_data = {
         "id": "test-agent-1",
@@ -64,17 +100,18 @@ def test_create_agent(client, auth_headers):
         "llm_config_id": "test-mock",
     }
 
-    response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
+    response = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     assert response.status_code == 201
     data = response.json()
     assert data["success"] is True
     assert data["agent_id"] == "test-agent-1"
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_health_check(client, auth_headers):
+async def test_health_check(async_client, auth_headers):
     """Test health check endpoint."""
-    response = client.get("/v1/health", headers=auth_headers)
+    response = await async_client.get("/v1/health", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert "status" in data
@@ -83,22 +120,25 @@ def test_health_check(client, auth_headers):
     assert "features" in data
 
 
-def test_unauthorized_access(client):
+@pytest.mark.asyncio
+async def test_unauthorized_access(async_client):
     """Test unauthorized access."""
-    response = client.get("/v1/templates/")
+    response = await async_client.get("/v1/templates/")
     assert response.status_code == 401
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_invalid_token(client):
+async def test_invalid_token(async_client):
     """Test invalid token."""
     headers = {"X-Runtime-Token": "invalid-token"}
-    response = client.get("/v1/templates/", headers=headers)
+    response = await async_client.get("/v1/templates/", headers=headers)
     assert response.status_code == 401
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_execute_agent(client, auth_headers):
+async def test_execute_agent(async_client, auth_headers):
     """Test agent execution via OpenAI-compatible chat completions."""
     # First create an agent
     agent_data = {
@@ -116,7 +156,7 @@ def test_execute_agent(client, auth_headers):
     }
     
     # Create the agent
-    create_response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
+    create_response = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     assert create_response.status_code == 201
     
     # Execute the agent using OpenAI-compatible format
@@ -137,7 +177,7 @@ def test_execute_agent(client, auth_headers):
         }
     }
     
-    response = client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
+    response = await async_client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
     assert response.status_code == 200
     
     data = response.json()
@@ -165,8 +205,9 @@ def test_execute_agent(client, auth_headers):
     assert "total_tokens" in usage
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_execute_nonexistent_agent(client, auth_headers):
+async def test_execute_nonexistent_agent(async_client, auth_headers):
     """Test execution of non-existent agent."""
     execution_data = {
         "model": "non-existent-agent",
@@ -178,12 +219,13 @@ def test_execute_nonexistent_agent(client, auth_headers):
         ]
     }
     
-    response = client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
+    response = await async_client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
     assert response.status_code == 404
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_execute_agent_streaming(client, auth_headers):
+async def test_execute_agent_streaming(async_client, auth_headers):
     """Test agent execution with streaming response."""
     # First create an agent
     agent_data = {
@@ -200,7 +242,7 @@ def test_execute_agent_streaming(client, auth_headers):
     }
     
     # Create the agent
-    create_response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
+    create_response = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     assert create_response.status_code == 201
     
     # Execute with streaming
@@ -215,7 +257,7 @@ def test_execute_agent_streaming(client, auth_headers):
         "stream": True
     }
     
-    response = client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
+    response = await async_client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
     assert response.status_code == 200
     # For streaming, we expect either SSE format or chunked response
     # The exact implementation will depend on the framework
@@ -223,8 +265,9 @@ def test_execute_agent_streaming(client, auth_headers):
 
 # === EXPANDED API TESTS FOR VALIDATION ERRORS AND EDGE CASES ===
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_create_agent_missing_required_fields(client, auth_headers):
+async def test_create_agent_missing_required_fields(async_client, auth_headers):
     """Test agent creation with missing required fields."""
     # Missing name
     agent_data = {
@@ -234,7 +277,7 @@ def test_create_agent_missing_required_fields(client, auth_headers):
         "llm_config_id": "test"
     }
 
-    response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
+    response = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     assert response.status_code == 422  # Unprocessable Entity
     data = response.json()
     assert "detail" in data
@@ -246,12 +289,13 @@ def test_create_agent_missing_required_fields(client, auth_headers):
         "llm_config_id": "test"
     }
 
-    response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
+    response = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     assert response.status_code == 422
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_create_agent_invalid_field_types(client, auth_headers):
+async def test_create_agent_invalid_field_types(async_client, auth_headers):
     """Test agent creation with invalid field types."""
     # Invalid temperature type
     agent_data = {
@@ -265,7 +309,7 @@ def test_create_agent_invalid_field_types(client, auth_headers):
         }
     }
 
-    response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
+    response = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     # Should either validate or handle gracefully
     assert response.status_code in [400, 422]
 
@@ -279,12 +323,13 @@ def test_create_agent_invalid_field_types(client, auth_headers):
         "metadata": "should-be-object"  # Should be object
     }
 
-    response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
+    response = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     assert response.status_code in [400, 422]
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_create_agent_duplicate_id(client, auth_headers):
+async def test_create_agent_duplicate_id(async_client, auth_headers):
     """Test creating agent with duplicate ID."""
     agent_data = {
         "id": "duplicate-agent",
@@ -295,17 +340,18 @@ def test_create_agent_duplicate_id(client, auth_headers):
     }
 
     # Create first agent
-    response1 = client.post("/v1/agents", json=agent_data, headers=auth_headers)
+    response1 = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     assert response1.status_code == 201
 
     # Try to create second agent with same ID
     agent_data["name"] = "Second Agent"  # Different name, same ID
-    response2 = client.post("/v1/agents", json=agent_data, headers=auth_headers)
+    response2 = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     assert response2.status_code in [400, 409]  # Bad Request or Conflict
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_create_agent_with_invalid_template(client, auth_headers):
+async def test_create_agent_with_invalid_template(async_client, auth_headers):
     """Test creating agent with non-existent template."""
     agent_data = {
         "id": "invalid-template-agent",
@@ -314,12 +360,13 @@ def test_create_agent_with_invalid_template(client, auth_headers):
         "llm_config_id": "test"
     }
 
-    response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
+    response = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     assert response.status_code == 400  # Should validate template exists
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_chat_completions_missing_required_fields(client, auth_headers):
+async def test_chat_completions_missing_required_fields(async_client, auth_headers):
     """Test chat completions with missing required fields."""
     # Missing model
     execution_data = {
@@ -331,7 +378,7 @@ def test_chat_completions_missing_required_fields(client, auth_headers):
         ]
     }
     
-    response = client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
+    response = await async_client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
     assert response.status_code == 422
     
     # Missing messages
@@ -339,12 +386,13 @@ def test_chat_completions_missing_required_fields(client, auth_headers):
         "model": "test-agent"
     }
     
-    response = client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
+    response = await async_client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
     assert response.status_code == 422
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_chat_completions_invalid_parameters(client, auth_headers):
+async def test_chat_completions_invalid_parameters(async_client, auth_headers):
     """Test chat completions with invalid parameters."""
     # Invalid temperature range
     execution_data = {
@@ -353,7 +401,7 @@ def test_chat_completions_invalid_parameters(client, auth_headers):
         "temperature": 3.0  # Should be between 0-2
     }
     
-    response = client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
+    response = await async_client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
     assert response.status_code in [400, 422]
     
     # Invalid max_tokens
@@ -363,12 +411,13 @@ def test_chat_completions_invalid_parameters(client, auth_headers):
         "max_tokens": -100  # Should be positive
     }
     
-    response = client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
+    response = await async_client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
     assert response.status_code in [400, 422]
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_chat_completions_invalid_message_format(client, auth_headers):
+async def test_chat_completions_invalid_message_format(async_client, auth_headers):
     """Test chat completions with invalid message format."""
     # Missing role
     execution_data = {
@@ -381,7 +430,7 @@ def test_chat_completions_invalid_message_format(client, auth_headers):
         ]
     }
     
-    response = client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
+    response = await async_client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
     assert response.status_code == 422
     
     # Invalid role
@@ -395,7 +444,7 @@ def test_chat_completions_invalid_message_format(client, auth_headers):
         ]
     }
     
-    response = client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
+    response = await async_client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
     assert response.status_code in [400, 422]
     
     # Missing content
@@ -409,23 +458,25 @@ def test_chat_completions_invalid_message_format(client, auth_headers):
         ]
     }
     
-    response = client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
+    response = await async_client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
     assert response.status_code == 422
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_chat_completions_empty_messages(client, auth_headers):
+async def test_chat_completions_empty_messages(async_client, auth_headers):
     """Test chat completions with empty messages array."""
     execution_data = {
         "model": "test-agent",
         "messages": []
     }
     
-    response = client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
+    response = await async_client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
     assert response.status_code in [400, 422]
 
 
-def test_missing_authentication_various_endpoints(client):
+@pytest.mark.asyncio
+async def test_missing_authentication_various_endpoints(async_client):
     """Test missing authentication on various endpoints."""
     endpoints = [
         ("GET", "/v1/templates/"),
@@ -436,26 +487,28 @@ def test_missing_authentication_various_endpoints(client):
     
     for method, endpoint in endpoints:
         if method == "GET":
-            response = client.get(endpoint)
+            response = await async_client.get(endpoint)
         elif method == "POST":
-            response = client.post(endpoint, json={})
+            response = await async_client.post(endpoint, json={})
         
         assert response.status_code == 401
 
 
-def test_malformed_json_requests(client, auth_headers):
+@pytest.mark.asyncio
+async def test_malformed_json_requests(async_client, auth_headers):
     """Test malformed JSON in request bodies."""
     # Test with invalid JSON
-    response = client.post(
-        "/v1/agents",
+    response = await async_client.post(
+        "/v1/agents/",
         data="invalid json",
         headers={**auth_headers, "Content-Type": "application/json"}
     )
     assert response.status_code == 422
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_content_type_validation(client, auth_headers):
+async def test_content_type_validation(async_client, auth_headers):
     """Test content type validation for POST requests."""
     agent_data = {
         "id": "content-type-test",
@@ -465,7 +518,7 @@ def test_content_type_validation(client, auth_headers):
     }
     
     # Test with wrong content type
-    response = client.post(
+    response = await async_client.post(
         "/v1/agents/",
         content=str(agent_data),
         headers={**auth_headers, "Content-Type": "text/plain"}
@@ -473,8 +526,9 @@ def test_content_type_validation(client, auth_headers):
     assert response.status_code in [400, 415, 422]
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_large_request_payload(client, auth_headers):
+async def test_large_request_payload(async_client, auth_headers):
     """Test handling of large request payloads."""
     # Create very large system prompt
     large_prompt = "x" * 100000  # 100KB prompt
@@ -487,13 +541,14 @@ def test_large_request_payload(client, auth_headers):
         "system_prompt": large_prompt
     }
     
-    response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
+    response = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     # Should either accept or reject gracefully
     assert response.status_code == 400 # Agent configuration is too large
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_unicode_and_special_characters(client, auth_headers):
+async def test_unicode_and_special_characters(async_client, auth_headers):
     """Test handling of unicode and special characters."""
     agent_data = {
         "id": "unicode-test-agent",
@@ -504,14 +559,15 @@ def test_unicode_and_special_characters(client, auth_headers):
         "system_prompt": "You are 🤖 multilingual: Hola, مرحبا, 你好, Привет"
     }
     
-    response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
+    response = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
     assert response.status_code == 201
     data = response.json()
     assert data["success"] is True
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_boundary_values_temperature(client, auth_headers):
+async def test_boundary_values_temperature(async_client, auth_headers):
     """Test boundary values for temperature parameter."""
     # First create an agent
     agent_data = {
@@ -521,7 +577,8 @@ def test_boundary_values_temperature(client, auth_headers):
         "template_version_id": "1.0.0",
         "llm_config_id": "test-mock"
     }
-    client.post("/v1/agents", json=agent_data, headers=auth_headers)
+    response = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
+    assert response.status_code == 201
     
     # Test minimum boundary (0.0)
     execution_data = {
@@ -530,72 +587,62 @@ def test_boundary_values_temperature(client, auth_headers):
         "temperature": 0.0
     }
     
-    response = client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
+    response = await async_client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
     assert response.status_code == 200
     
     # Test maximum boundary (2.0)
     execution_data["temperature"] = 2.0
-    response = client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
+    response = await async_client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
     assert response.status_code == 200
     
     # Test just outside boundaries
     execution_data["temperature"] = -0.1
-    response = client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
+    response = await async_client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
     assert response.status_code in [400, 422]
     
     execution_data["temperature"] = 2.1
-    response = client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
+    response = await async_client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
     assert response.status_code in [400, 422]
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_various_http_methods_unsupported_endpoints(client, auth_headers):
+async def test_various_http_methods_unsupported_endpoints(async_client, auth_headers):
     """Test unsupported HTTP methods on endpoints."""
     # Test unsupported methods
     unsupported_tests = [
         ("DELETE", "/v1/templates/"),
         ("PUT", "/v1/templates/"),
         ("PATCH", "/v1/templates/"),
-        ("DELETE", "/v1/agents"),
+        ("DELETE", "/v1/agents/"),
         ("PUT", "/v1/chat/completions"),
         ("PATCH", "/v1/chat/completions")
     ]
     
     for method, endpoint in unsupported_tests:
-        response = client.request(method, endpoint, headers=auth_headers)
+        response = await async_client.request(method, endpoint, headers=auth_headers)
         assert response.status_code == 405  # Method Not Allowed
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_concurrent_agent_creation(client, auth_headers):
-    """Test concurrent agent creation requests."""
-    import threading
-    
-    results = []
-    
-    def create_agent(agent_id):
+async def test_concurrent_agent_creation(async_client, auth_headers):
+    """Test concurrent agent creation requests."""    
+    async def create_agent(agent_id):
         agent_data = {
             "id": f"concurrent-{agent_id}",
             "name": f"Concurrent Agent {agent_id}",
             "template_id": "simple-test",
             "template_version_id": "1.0.0"
         }
-        response = client.post("/v1/agents/", json=agent_data, headers=auth_headers)
-        results.append((agent_id, response.status_code))
+        response = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
+        return (agent_id, response.status_code)
     
-    # Create multiple threads
-    threads = []
-    for i in range(5):
-        thread = threading.Thread(target=create_agent, args=(i,))
-        threads.append(thread)
+    # Create multiple concurrent tasks
+    tasks = [create_agent(i) for i in range(5)]
     
-    # Start all threads
-    for thread in threads:
-        thread.start()
-    
-    # Wait for completion
-    for thread in threads:
-        thread.join()
+    # Execute all tasks concurrently
+    results = await asyncio.gather(*tasks)
     
     # Verify results
     assert len(results) == 5
@@ -603,22 +650,23 @@ def test_concurrent_agent_creation(client, auth_headers):
     assert success_count == 5  # All should succeed with different IDs
 
 
+@pytest.mark.asyncio
 @patch("runtime.settings.settings.runtime_token", "test-token")
-def test_error_response_format_consistency(client, auth_headers):
+async def test_error_response_format_consistency(async_client, auth_headers):
     """Test that error responses have consistent format."""
     # Test various error scenarios and ensure consistent response format
     error_scenarios = [
         # Invalid JSON
         {
             "method": "post",
-            "endpoint": "/v1/agents",
+            "endpoint": "/v1/agents/",
             "data": "invalid json",
             "content_type": "application/json"
         },
         # Missing required field
         {
             "method": "post",
-            "endpoint": "/v1/agents", 
+            "endpoint": "/v1/agents/", 
             "json": {"id": "test"}  # Missing required fields
         },
         # Non-existent agent execution
@@ -635,7 +683,7 @@ def test_error_response_format_consistency(client, auth_headers):
     for scenario in error_scenarios:
         if scenario["method"] == "post":
             if "json" in scenario:
-                response = client.post(
+                response = await async_client.post(
                     scenario["endpoint"],
                     json=scenario["json"],
                     headers=auth_headers
@@ -644,7 +692,7 @@ def test_error_response_format_consistency(client, auth_headers):
                 headers = dict(auth_headers)
                 if "content_type" in scenario:
                     headers["Content-Type"] = scenario["content_type"]
-                response = client.post(
+                response = await async_client.post(
                     scenario["endpoint"],
                     data=scenario["data"],
                     headers=headers

@@ -116,8 +116,6 @@ class InMemoryMessageQueue(MessageQueueInterface):
                     elapsed = asyncio.get_event_loop().time() - start_time
                     if elapsed >= timeout_seconds:
                         return []
-                    
-                    logger.debug(f"Waiting for messages in queue {queue_name}...")
                 else:
                     # Get messages up to max_messages
                     messages = []
@@ -133,8 +131,6 @@ class InMemoryMessageQueue(MessageQueueInterface):
                         await self._update_queue_stats(queue_name)
                         logger.debug(f"Received {len(messages)} messages from queue {queue_name}")
                         return messages
-                    
-                    logger.debug(f"No messages available in queue {queue_name}, continuing to wait...")
                 
             # Wait a bit before checking again
             await asyncio.sleep(0.1)
