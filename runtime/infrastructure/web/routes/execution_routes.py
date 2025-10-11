@@ -169,10 +169,7 @@ async def _stream_chat_completion(
     service: ExecuteAgentService, 
     command: ExecuteAgentCommand
 ) -> AsyncGenerator[str, None]:
-    """Stream chat completion chunks in OpenAI SSE format."""
-    import time
-    import uuid
-    
+    """Stream chat completion chunks in OpenAI SSE format."""    
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
     created_timestamp = int(time.time())
     
@@ -205,7 +202,7 @@ async def _stream_chat_completion(
                 system_fingerprint="",
                 choices=[StreamingChunkChoice(
                     index=0,
-                    delta=StreamingChunkDelta(content=content),
+                    delta=StreamingChunkDelta(role="agent", content=content),
                     finish_reason=core_chunk.finish_reason
                 )]
             )

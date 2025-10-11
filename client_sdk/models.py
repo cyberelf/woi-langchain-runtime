@@ -30,7 +30,6 @@ class CreateAgentRequest(BaseModel):
     name: str = Field(..., description="Agent name")
     description: Optional[str] = Field(None, description="Agent description")
     avatar_url: Optional[str] = Field(None, description="Agent avatar URL")
-    type: str = Field(..., description="Agent type")
     
     # Template fields - following API specification
     template_id: str = Field(..., description="Template type identifier")

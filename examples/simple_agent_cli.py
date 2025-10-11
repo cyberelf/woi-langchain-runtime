@@ -79,7 +79,6 @@ async def main():
                 name="Simple Test CLI Agent",
                 description="A simple test agent for CLI demonstration",
                 avatar_url=None,
-                type=simple_template.id,
                 template_id=simple_template.id,
                 template_version_id=simple_template.version,  # Updated: removed template_version
                 template_config={
@@ -149,7 +148,7 @@ async def main():
                 
                 if streaming:
                     # Stream response
-                    print(f"{agent_name}: ", end="")
+                    print(f"{agent_name}: ", end="", flush=True)
                     response_content = ""
                     stream = client.stream_chat_with_agent(
                         agent_info.agent_id, conversation_history

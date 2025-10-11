@@ -5,6 +5,8 @@ from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from runtime.core import agent_orchestrator
+
 
 class Settings(BaseSettings):
     """Application settings."""
@@ -23,6 +25,9 @@ class Settings(BaseSettings):
     # OpenAI configuration (fallback if LLM proxy not available)
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     openai_base_url: Optional[str] = Field(default=None, alias="OPENAI_BASE_URL")
+    deepseek_api_key: Optional[str] = Field(default=None, alias="DEEPL_API_KEY")
+    google_api_key: Optional[str] = Field(default=None, alias="GOOGLE_API_KEY")
+    anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
 
     # Runtime limits
     max_concurrent_agents: int = Field(default=100, alias="MAX_CONCURRENT_AGENTS")
