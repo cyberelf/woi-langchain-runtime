@@ -15,6 +15,8 @@ from langchain_deepseek import ChatDeepSeek
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
+from runtime.settings import settings
+
 from ..config import LLMConfig
 
 logger = logging.getLogger(__name__)
@@ -149,21 +151,24 @@ class LangGraphLLMService:
                 model=llm_config.model,
                 temperature=final_temperature,
                 max_completion_tokens=final_max_tokens,
-**(llm_config.metadata or {})
+                api_key=settings.openai_api_key,
+                **(llm_config.metadata or {})
             )
         elif llm_config.provider == "google":
             return ChatGoogleGenerativeAI(
                 model=llm_config.model,
                 temperature=final_temperature,
                 max_tokens=final_max_tokens,
-**(llm_config.metadata or {})
+                api_key=settings.google_api_key,
+                **(llm_config.metadata or {})
             )
         elif llm_config.provider == "deepseek":
             return ChatDeepSeek(
                 model=llm_config.model,
                 temperature=final_temperature,
                 max_tokens=final_max_tokens,
-**(llm_config.metadata or {})
+                api_key=settings.deepseek_api_key,
+                **(llm_config.metadata or {})
             )
         elif llm_config.provider == "test":
             # Mock LLM for testing - no API keys required

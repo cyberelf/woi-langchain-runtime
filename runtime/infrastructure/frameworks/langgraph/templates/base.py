@@ -1,13 +1,14 @@
 """LangGraph Base Agent Template - Framework-specific base class."""
 
+from curses import meta
 import logging
 import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
-from typing import Any, Optional, TypeVar
+from typing import Any, Literal, Optional, TypeVar
 from datetime import datetime, UTC
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, BaseMessageChunk
 from langgraph.graph.state import CompiledStateGraph
 
 from runtime.core.executors import ExecutionResult, StreamingChunk
@@ -137,22 +138,36 @@ class BaseLangGraphAgent(ABC):
             The response content as a string
         """
         pass
-
+    
     @abstractmethod
     async def _process_stream_chunk(
         self, 
-        chunk: Any, 
-        chunk_index: int = 0
+        chunk: BaseMessageChunk | Any, 
+        chunk_index: int = 0,
+        metadata: Optional[dict[str, Any]] = None
     ) -> AsyncGenerator[StreamingChunk, None]:
         """Process a streaming chunk from LangGraph execution.
         
         Args:
             chunk: Raw chunk from LangGraph streaming
             chunk_index: Index of this chunk in the sequence
+            metadata: Optional metadata associated with the chunk
         Yields:
             StreamingChunk objects for intermediate streaming responses
         """
-        pass
+        content = chunk.content if hasattr(chunk, 'content') else chunk
+        metadata = metadata or {}
+
+        yield StreamingChunk(
+            content=str(content),
+            finish_reason=None,
+            metadata={
+                'template_id': self.template_id,
+                'framework': 'langgraph',
+                'chunk_index': chunk_index,
+                **metadata
+            }
+        )
 
     async def get_graph(self) -> CompiledStateGraph:
         """Get the LangGraph execution graph."""
@@ -269,6 +284,7 @@ class BaseLangGraphAgent(ABC):
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         metadata: Optional[dict[str, Any]] = None,
+        stream_mode: Literal["messages"] = "messages",  # support only "messages" for now
     ) -> AsyncGenerator[StreamingChunk, None]:
         """Standard stream execute implementation for LangGraph agents."""
         logger.debug(f"🌊 LangGraph stream execute: {self.template_id} with {len(messages)} messages")
@@ -285,27 +301,25 @@ class BaseLangGraphAgent(ABC):
             chunk_index = 0
             total_content_length = 0
             
-            async for chunk in graph.astream(initial_state, stream_mode="values"):
+            async for chunk in graph.astream(initial_state, stream_mode=stream_mode):
                 logger.debug(f"📦 Processing stream chunk #{chunk_index}")
                 logger.debug(f"📦 Chunk data #{chunk}")
+                # chunk is a tuple of message and metadata
+                message, metadata = chunk   # type: ignore
                 
                 # Let subclasses handle chunk processing for streaming
                 # This is template-specific since state structures differ
-                chunk_generator = self._process_stream_chunk(chunk, chunk_index)
-                chunk_content_length = 0
+                chunk_generator = self._process_stream_chunk(message, chunk_index, metadata=metadata)
                 
                 async for completion_chunk in chunk_generator:
                     content_len = len(getattr(completion_chunk, 'content', ''))
-                    chunk_content_length += content_len
                     total_content_length += content_len
                     
                     logger.debug(f"📝 Processed stream chunk #{chunk_index}: {content_len} chars")
                     logger.debug(f"📝 Processed stream chunk data #{completion_chunk}")
+                    chunk_index += 1
                     yield completion_chunk
                 
-                logger.debug(f"✅ Chunk #{chunk_index} completed: {chunk_content_length} chars")
-                chunk_index += 1
-            
             logger.info(f"🏁 LangGraph streaming completed: {self.template_id}, "
                        f"{chunk_index} chunks, {total_content_length} total chars")
             

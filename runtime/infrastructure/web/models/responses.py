@@ -91,7 +91,8 @@ class StreamingChunk(BaseModel):
     created: int = Field(..., description="Creation timestamp")
     model: str = Field(..., description="Agent ID (model)")
     choices: list[StreamingChunkChoice] = Field(..., description="Streaming choices")
-    system_fingerprint: Optional[str] = Field(None, description="System fingerprint")
+    system_fingerprint: Optional[str] = Field(default=None, description="System fingerprint")
+    metadata: Optional[dict[str, Any]] = Field(default=None, description="Additional execution metadata")
 
     model_config = ConfigDict(extra="forbid")
 

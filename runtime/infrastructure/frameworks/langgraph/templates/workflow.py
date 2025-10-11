@@ -491,7 +491,8 @@ class WorkflowAgent(BaseLangGraphAgent):
     async def _process_stream_chunk(
         self, 
         chunk: Any, 
-        chunk_index: int = 0
+        chunk_index: int = 0,
+        metadata: Optional[dict[str, Any]] = None
     ) -> AsyncGenerator[StreamingChunk, None]:
         """Process streaming chunks for workflow agent."""
         
@@ -527,14 +528,8 @@ class WorkflowAgent(BaseLangGraphAgent):
                         }
                     )
         else:
-            # Handle non-WorkflowState chunks
-            yield StreamingChunk(
-                content=str(chunk),
-                finish_reason=None,
-                metadata={
-                    'template_id': self.template_id,
-                    'framework': 'langgraph',
-                    'chunk_index': chunk_index
-                }
-            )
+            async for streaming_chunk in super()._process_stream_chunk(
+                chunk, chunk_index=chunk_index, metadata=metadata
+            ):            
+                yield streaming_chunk
     

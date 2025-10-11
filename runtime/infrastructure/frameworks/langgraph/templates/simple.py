@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 from langgraph.prebuilt import create_react_agent
 from langgraph.graph.state import CompiledStateGraph
+from langchain_core.messages import BaseMessageChunk
 from pydantic import BaseModel, Field
 
 from runtime.infrastructure.frameworks.langgraph.llm.service import LangGraphLLMService
@@ -125,56 +126,13 @@ class SimpleTestAgent(BaseLangGraphAgent):
 
     async def _process_stream_chunk(
         self,
-        chunk: Any,
-        chunk_index: int = 0
+        chunk: BaseMessageChunk | Any,
+        chunk_index: int = 0,
+        metadata: Optional[dict[str, Any]] = None
     ) -> AsyncGenerator[StreamingChunk, None]:
         """Process streaming chunks for simple agent."""
-
-
-        # Process each chunk from LangGraph
-        if isinstance(chunk, dict):
-            # Look for message updates in the chunk
-            messages_update = chunk.get("messages", [])
-
-            if messages_update:
-                # Get the latest message
-                latest_message = messages_update[-1]
-
-                if hasattr(latest_message, 'content'):
-                    current_content = latest_message.content
-                else:
-                    current_content = str(latest_message)
-
-                # Add prefix if this is the first chunk and prefix is configured
-                if self.response_prefix and not current_content.startswith(self.response_prefix):
-                    current_content = self.response_prefix + current_content
-
-                # Yield the content as a streaming chunk (simplified core format)
-                yield StreamingChunk(
-                    content=current_content,
-                    finish_reason=None,
-                    metadata={
-                        'template_id': self.template_id,
-                        'framework': 'langgraph',
-                        'chunk_index': chunk_index
-                    }
-                )
-        else:
-            # Handle non-dict chunks (strings, etc.)
-            content = str(chunk)
-
-            if self.response_prefix and not content.startswith(self.response_prefix):
-                content = self.response_prefix + content
-
-            yield StreamingChunk(
-                content=content,
-                finish_reason=None,
-                metadata={
-                    'template_id': self.template_id,
-                    'framework': 'langgraph',
-                    'chunk_index': chunk_index
-                }
-            )
-
-
-    
+        # Leverage base implementation for standard processing
+        async for streaming_chunk in super()._process_stream_chunk(
+            chunk, chunk_index=chunk_index, metadata=metadata
+        ):            
+            yield streaming_chunk

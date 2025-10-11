@@ -116,6 +116,10 @@ async def main():
         
         streaming = False
         conversation_history = []
+
+        # task and context id
+        task_id = None
+        context_id = None
         
         while True:
             try:

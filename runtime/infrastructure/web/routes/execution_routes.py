@@ -204,7 +204,13 @@ async def _stream_chat_completion(
                     index=0,
                     delta=StreamingChunkDelta(role="agent", content=content),
                     finish_reason=core_chunk.finish_reason
-                )]
+                )],
+                metadata={
+                    "task_id": core_chunk.task_id,
+                    "message_id": core_chunk.message_id,
+                    "context_id": core_chunk.context_id,
+                    **(core_chunk.metadata or {})
+                }
             )
             
             # Format as Server-Sent Event
@@ -290,11 +296,16 @@ def _convert_execution_result_to_chat_completion(
     
     # Create the complete response
     return ChatCompletionResponse(
-        id=f"chatcmpl-{uuid.uuid4().hex[:8]}",
+        id=execution_result.message_id or f"chatcmpl-{uuid.uuid4().hex[:8]}",
         object="chat.completion",
         created=int(time.time()),
         model=model_id,
         choices=[choice],
         usage=usage,
-        metadata=execution_result.metadata
+        metadata={
+            "task_id": execution_result.task_id,
+            "message_id": execution_result.message_id,
+            "context_id": execution_result.context_id,
+            **execution_result.metadata
+        }
     )
