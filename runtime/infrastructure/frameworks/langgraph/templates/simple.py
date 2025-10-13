@@ -27,7 +27,7 @@ class SimpleTestAgentConfig(BaseModel):
     )
 
 
-class SimpleTestAgent(BaseLangGraphAgent):
+class SimpleTestAgent(BaseLangGraphAgent[SimpleTestAgentConfig]):
     """Simple test agent template for validation - no external dependencies."""
 
     # Template metadata (class variables)
@@ -38,7 +38,7 @@ class SimpleTestAgent(BaseLangGraphAgent):
     framework: str = "langgraph"
 
     # Configuration schema (class variables)
-    config_schema: type[BaseModel] = SimpleTestAgentConfig
+    config_schema: type[SimpleTestAgentConfig] = SimpleTestAgentConfig
 
     def __init__(
         self, 
@@ -51,11 +51,11 @@ class SimpleTestAgent(BaseLangGraphAgent):
         super().__init__(configuration, llm_service, toolset_service, metadata)
         self._graph: CompiledStateGraph | None = None
         
-        # Extract template-specific configuration using helper methods
-        self.response_prefix = self.get_config_value("response_prefix", "Test: ")
+        # Access configuration via the typed config object - no cast needed!
+        self.response_prefix = self.config.response_prefix
         
         # Extract configuration values for LangGraph-specific setup
-        self.system_prompt = self.system_prompt or "You are a helpful assistant."
+        self.system_prompt = self.system_prompt or self.config.system_prompt
 
     def _get_llm_client(self, temperature: Optional[float] = None, max_tokens: Optional[int] = None):
         """Get LLM client configured with execution parameters."""

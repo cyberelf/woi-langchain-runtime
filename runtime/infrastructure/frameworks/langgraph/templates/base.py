@@ -5,7 +5,7 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
-from typing import Any, Literal, Optional, TypeVar
+from typing import Any, Generic, Literal, Optional, TypeVar
 from datetime import datetime, UTC
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, BaseMessageChunk
@@ -25,8 +25,11 @@ logger = logging.getLogger(__name__)
 # Type variable for state management
 StateType = TypeVar('StateType')
 
+# Type variable for configuration schema
+ConfigSchemaType = TypeVar('ConfigSchemaType', bound=BaseModel)
 
-class BaseLangGraphAgent(ABC):
+
+class BaseLangGraphAgent(ABC, Generic[ConfigSchemaType]):
     """
     Base class for LangGraph agent templates.
 
@@ -36,6 +39,9 @@ class BaseLangGraphAgent(ABC):
     - State creation interface
     - Common execution patterns
     - LLM client integration
+    
+    Type Parameters:
+        ConfigSchemaType: The Pydantic model type for this agent's configuration schema
     """
 
     # Template Metadata (should be overridden in subclasses)
@@ -46,7 +52,7 @@ class BaseLangGraphAgent(ABC):
     framework: str = "langgraph"
 
     # Placeholder for the configuration schema, should be overridden in subclasses
-    config_schema: type[BaseModel] = BaseModel
+    config_schema: type[ConfigSchemaType]
 
     def __init__(
         self, 
@@ -74,8 +80,9 @@ class BaseLangGraphAgent(ABC):
         # Store the configuration value object
         self.agent_configuration = configuration
         
-        # Get template configuration dict for backward compatibility
+        # Convert template configuration dict to config_schema object
         self.template_config = configuration.get_template_configuration()
+        self.config: ConfigSchemaType = self.config_schema.model_validate(self.template_config)
         self.system_prompt = configuration.system_prompt
 
         # LangGraph-specific initialization
@@ -271,9 +278,10 @@ class BaseLangGraphAgent(ABC):
         except Exception as e:
             processing_time = int((time.time() - start_time) * 1000)
             logger.error(f"❌ LangGraph execution failed: {self.template_id} after {processing_time}ms: {e}")
+            logger.exception(f"Full exception details for {self.template_id}:")
             return ExecutionResult(
                 success=False,
-                error=str(e),
+                error=str(e) if str(e) else f"{type(e).__name__}: {repr(e)}",
                 processing_time_ms=processing_time,
                 metadata={'template_id': self.template_id, 'framework': 'langgraph'}
             )
@@ -399,27 +407,15 @@ class BaseLangGraphAgent(ABC):
     def validate_configuration(cls, configuration: dict[str, Any]) -> tuple[bool, Optional[ValidationError]]:
         """Validate the configuration for the template."""
         try:
+            logger.debug(f"Validating configuration for template '{cls.config_schema}' with data: {configuration}")
             cls.config_schema.model_validate(configuration)
             return True, None
         except ValidationError as e:
             return False, e
-
-    def get_config_value(self, key: str, default: Any = None) -> Any:
-        """Get a configuration value from template_config.
         
-        Args:
-            key: Configuration key to retrieve
-            default: Default value if key not found
-            
-        Returns:
-            Configuration value or default
-        """
-        # Check template_config first for backward compatibility
-        if key in self.template_config:
-            return self.template_config[key]
-        
-        # Then check AgentConfiguration's template_config
-        return self.agent_configuration.get_template_config_value(key, default)
+    def get_config(self) -> BaseModel:
+        """Get the configuration as a Pydantic model instance."""
+        return self.config
     
     def cleanup(self):
         """Clean up agent resources if needed."""

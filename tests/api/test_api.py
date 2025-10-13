@@ -704,3 +704,297 @@ async def test_error_response_format_consistency(async_client, auth_headers):
         data = response.json()
         # Should have either 'detail' (FastAPI standard) or 'error' field
         assert "detail" in data or "error" in data or "message" in data
+
+
+# === WORKFLOW AGENT TESTS ===
+
+@pytest.mark.asyncio
+@patch("runtime.settings.settings.runtime_token", "test-token")
+async def test_create_workflow_agent(async_client, auth_headers):
+    """Test creating a workflow agent with multiple steps."""
+    agent_data = {
+        "id": "test-workflow-agent",
+        "name": "Test Workflow Agent",
+        "description": "A workflow agent for testing multi-step execution",
+        "template_id": "langgraph-workflow",
+        "template_version_id": "1.0.0",
+        "template_config": {
+            "steps": [
+                {
+                    "name": "Step 1: Gather Information",
+                    "prompt": "Analyze the user's question and identify key information needed.",
+                    "tools": [],
+                    "timeout": 30,
+                    "retry_count": 1
+                },
+                {
+                    "name": "Step 2: Process Data",
+                    "prompt": "Process the gathered information and prepare a response.",
+                    "tools": [],
+                    "timeout": 30,
+                    "retry_count": 1
+                },
+                {
+                    "name": "Step 3: Generate Response",
+                    "prompt": "Create a comprehensive response based on the processed data.",
+                    "tools": [],
+                    "timeout": 30,
+                    "retry_count": 0
+                }
+            ],
+            "max_retries": 2,
+            "step_timeout": 60,
+            "fail_on_error": True
+        },
+        "system_prompt": "You are a workflow agent that executes tasks in multiple steps.",
+        "llm_config_id": "test-mock",
+    }
+
+    response = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["success"] is True
+    assert data["agent_id"] == "test-workflow-agent"
+
+
+@pytest.mark.asyncio
+@patch("runtime.settings.settings.runtime_token", "test-token")
+async def test_execute_workflow_agent(async_client, auth_headers):
+    """Test executing a workflow agent."""
+    # First create a workflow agent
+    agent_data = {
+        "id": "test-workflow-exec",
+        "name": "Test Workflow Execution",
+        "template_id": "langgraph-workflow",
+        "template_version_id": "1.0.0",
+        "template_config": {
+            "steps": [
+                {
+                    "name": "Analyze Request",
+                    "prompt": "Analyze the user's request and extract key points.",
+                    "tools": [],
+                    "timeout": 30
+                },
+                {
+                    "name": "Generate Response",
+                    "prompt": "Generate a helpful response based on the analysis.",
+                    "tools": [],
+                    "timeout": 30
+                }
+            ],
+            "max_retries": 1,
+            "fail_on_error": False
+        },
+        "system_prompt": "You are a helpful workflow assistant.",
+        "llm_config_id": "test-mock",
+    }
+    
+    # Create the agent
+    create_response = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
+    assert create_response.status_code == 201
+    
+    # Execute the workflow agent
+    execution_data = {
+        "model": "test-workflow-exec",
+        "messages": [
+            {
+                "role": "user",
+                "content": "Please help me understand workflow agents."
+            }
+        ],
+        "temperature": 0.7,
+        "max_tokens": 500,
+        "stream": False
+    }
+    
+    response = await async_client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
+    assert response.status_code == 200
+    
+    data = response.json()
+    assert "id" in data
+    assert data["object"] == "chat.completion"
+    assert data["model"] == "test-workflow-exec"
+    assert len(data["choices"]) > 0
+    
+    # Check response content
+    choice = data["choices"][0]
+    assert choice["message"]["role"] == "assistant"
+    assert len(choice["message"]["content"]) > 0
+
+
+@pytest.mark.asyncio
+@patch("runtime.settings.settings.runtime_token", "test-token")
+async def test_execute_workflow_agent_streaming(async_client, auth_headers):
+    """Test executing a workflow agent with streaming."""
+    # Create a workflow agent
+    agent_data = {
+        "id": "test-workflow-streaming",
+        "name": "Test Workflow Streaming",
+        "template_id": "langgraph-workflow",
+        "template_version_id": "1.0.0",
+        "template_config": {
+            "steps": [
+                {
+                    "name": "Step 1",
+                    "prompt": "First step of the workflow.",
+                    "tools": []
+                },
+                {
+                    "name": "Step 2",
+                    "prompt": "Second step of the workflow.",
+                    "tools": []
+                }
+            ],
+            "max_retries": 1
+        },
+        "system_prompt": "You are a workflow agent.",
+        "llm_config_id": "test-mock",
+    }
+    
+    create_response = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
+    assert create_response.status_code == 201
+    
+    # Execute with streaming
+    execution_data = {
+        "model": "test-workflow-streaming",
+        "messages": [
+            {
+                "role": "user",
+                "content": "Execute the workflow steps."
+            }
+        ],
+        "stream": True
+    }
+    
+    response = await async_client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+@patch("runtime.settings.settings.runtime_token", "test-token")
+async def test_workflow_agent_with_invalid_config(async_client, auth_headers):
+    """Test creating a workflow agent with invalid configuration."""
+    # Missing steps - should fail validation
+    agent_data = {
+        "id": "test-workflow-invalid",
+        "name": "Invalid Workflow Agent",
+        "template_id": "langgraph-workflow",
+        "template_version_id": "1.0.0",
+        "template_config": {
+            "steps": [],  # Empty steps should fail
+            "max_retries": 2
+        },
+        "llm_config_id": "test-mock",
+    }
+    
+    response = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
+    # Should return an error for invalid configuration
+    assert response.status_code in [400, 422]
+
+
+@pytest.mark.asyncio
+@patch("runtime.settings.settings.runtime_token", "test-token")
+async def test_workflow_agent_with_tools(async_client, auth_headers):
+    """Test creating a workflow agent with tool configurations."""
+    agent_data = {
+        "id": "test-workflow-tools",
+        "name": "Workflow Agent with Tools",
+        "template_id": "langgraph-workflow",
+        "template_version_id": "1.0.0",
+        "template_config": {
+            "steps": [
+                {
+                    "name": "Calculate",
+                    "prompt": "Perform calculations using available tools.",
+                    "tools": ["calculator"],
+                    "timeout": 45
+                },
+                {
+                    "name": "Summarize",
+                    "prompt": "Summarize the calculation results.",
+                    "tools": [],
+                    "timeout": 30
+                }
+            ],
+            "max_retries": 2,
+            "fail_on_error": True
+        },
+        "system_prompt": "You are a calculation workflow agent.",
+        "llm_config_id": "test-mock",
+    }
+    
+    response = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["success"] is True
+
+
+@pytest.mark.asyncio
+@patch("runtime.settings.settings.runtime_token", "test-token")
+async def test_workflow_agent_multi_step_execution(async_client, auth_headers):
+    """Test workflow agent with multiple complex steps."""
+    agent_data = {
+        "id": "test-workflow-complex",
+        "name": "Complex Workflow Agent",
+        "template_id": "langgraph-workflow",
+        "template_version_id": "1.0.0",
+        "template_config": {
+            "steps": [
+                {
+                    "name": "Data Collection",
+                    "prompt": "Collect all relevant data from the user's request.",
+                    "tools": [],
+                    "timeout": 30,
+                    "retry_count": 2
+                },
+                {
+                    "name": "Data Validation",
+                    "prompt": "Validate the collected data for consistency and completeness.",
+                    "tools": [],
+                    "timeout": 30,
+                    "retry_count": 1
+                },
+                {
+                    "name": "Processing",
+                    "prompt": "Process the validated data and perform necessary operations.",
+                    "tools": [],
+                    "timeout": 45,
+                    "retry_count": 1
+                },
+                {
+                    "name": "Result Formatting",
+                    "prompt": "Format the results in a user-friendly way.",
+                    "tools": [],
+                    "timeout": 30,
+                    "retry_count": 0
+                }
+            ],
+            "max_retries": 2,
+            "step_timeout": 60,
+            "fail_on_error": False
+        },
+        "system_prompt": "You are an advanced workflow agent handling complex multi-step processes.",
+        "llm_config_id": "test-mock",
+    }
+    
+    create_response = await async_client.post("/v1/agents/", json=agent_data, headers=auth_headers)
+    assert create_response.status_code == 201
+    
+    # Execute the complex workflow
+    execution_data = {
+        "model": "test-workflow-complex",
+        "messages": [
+            {
+                "role": "user",
+                "content": "Process this complex request with multiple validation steps."
+            }
+        ],
+        "temperature": 0.5,
+        "max_tokens": 1000
+    }
+    
+    response = await async_client.post("/v1/chat/completions", json=execution_data, headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["object"] == "chat.completion"
+    assert len(data["choices"]) > 0

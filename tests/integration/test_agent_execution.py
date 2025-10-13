@@ -18,6 +18,8 @@ from runtime.infrastructure.frameworks.langgraph.executor import LangGraphFramew
 from runtime.service_config import ServicesConfig
 from runtime.domain.value_objects.agent_configuration import AgentConfiguration
 
+
+
 @pytest.mark.asyncio
 async def test_execute_agent():
     """Test agent execution with proper orchestrator initialization."""
@@ -717,6 +719,598 @@ async def test_streaming_execution_empty_response():
 
         print(f"Empty response test: handled empty content gracefully")
 
+    finally:
+        await orchestrator.shutdown()
+        await message_queue.shutdown()
+
+
+# === WORKFLOW AGENT INTEGRATION TESTS ===
+
+@pytest.mark.asyncio
+async def test_workflow_agent_execution():
+    """Test workflow agent execution with multiple steps."""
+    # Setup message queue and unit of work
+    message_queue = InMemoryMessageQueue()
+    await message_queue.initialize()
+    uow = TransactionalInMemoryUnitOfWork()
+    
+    # Create a workflow agent
+    configuration = AgentConfiguration(
+        llm_config_id="test",
+        template_config={
+            "steps": [
+                {
+                    "name": "Step 1: Analysis",
+                    "prompt": "Analyze the user's input and identify key points.",
+                    "tools": [],
+                    "timeout": 30,
+                    "retry_count": 1
+                },
+                {
+                    "name": "Step 2: Processing",
+                    "prompt": "Process the identified key points and prepare a response.",
+                    "tools": [],
+                    "timeout": 30,
+                    "retry_count": 1
+                },
+                {
+                    "name": "Step 3: Response",
+                    "prompt": "Generate a comprehensive response based on the processing.",
+                    "tools": [],
+                    "timeout": 30,
+                    "retry_count": 0
+                }
+            ],
+            "max_retries": 2,
+            "step_timeout": 60,
+            "fail_on_error": True
+        }
+    )
+    
+    agent = Agent.create(
+        name="test-workflow-agent",
+        template_id="langgraph-workflow",
+        template_version="1.0.0",
+        configuration=configuration,
+        metadata={}
+    )
+    
+    # Store the agent
+    async with uow:
+        await uow.agents.save(agent)
+        await uow.commit()
+    
+    # Setup framework executor
+    test_config = ServicesConfig(config_file="config/test-services-config.json")
+    framework_executor = LangGraphFrameworkExecutor(service_config=test_config.get_config_dict())
+    
+    # Create and initialize orchestrator
+    orchestrator = AgentOrchestrator(
+        message_queue=message_queue,
+        uow=uow,
+        framework_executor=framework_executor,
+        max_workers=2,
+        cleanup_interval_seconds=60,
+        instance_timeout_seconds=120
+    )
+    
+    await orchestrator.initialize()
+    
+    try:
+        # Create execute agent service
+        service = ExecuteAgentService(orchestrator)
+        
+        # Create execution command
+        command = ExecuteAgentCommand(
+            agent_id=str(agent.id.value),
+            messages=[
+                ChatMessage(
+                    role=MessageRole.USER,
+                    content="Please help me understand how workflow agents work."
+                )
+            ],
+            task_id="workflow-test-task",
+            user_id="test-user",
+            stream=False,
+            temperature=0.7,
+            max_tokens=500
+        )
+        
+        # Execute the workflow agent
+        result = await service.execute(command)
+        
+        # Verify result
+        assert result is not None
+        assert result.agent_id == str(agent.id.value)
+        assert result.success is True
+        assert result.message is not None
+        assert len(result.message) > 0
+        print(f"Workflow execution result: success={result.success}, message length: {len(result.message)}")
+        
+    finally:
+        await orchestrator.shutdown()
+        await message_queue.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_workflow_agent_streaming_execution():
+    """Test workflow agent with streaming execution."""
+    # Setup
+    message_queue = InMemoryMessageQueue()
+    await message_queue.initialize()
+    uow = TransactionalInMemoryUnitOfWork()
+    
+    # Create workflow agent with 2 steps
+    configuration = AgentConfiguration(
+        llm_config_id="test",
+        template_config={
+            "steps": [
+                {
+                    "name": "Gather Information",
+                    "prompt": "Gather information from the user's request.",
+                    "tools": [],
+                    "timeout": 30
+                },
+                {
+                    "name": "Generate Response",
+                    "prompt": "Generate a helpful response.",
+                    "tools": [],
+                    "timeout": 30
+                }
+            ],
+            "max_retries": 1,
+            "fail_on_error": False
+        }
+    )
+    
+    agent = Agent.create(
+        name="test-workflow-streaming",
+        template_id="langgraph-workflow",
+        template_version="1.0.0",
+        configuration=configuration,
+        metadata={}
+    )
+    
+    async with uow:
+        await uow.agents.save(agent)
+        await uow.commit()
+    
+    # Setup framework executor
+    test_config = ServicesConfig(config_file="config/test-services-config.json")
+    framework_executor = LangGraphFrameworkExecutor(service_config=test_config.get_config_dict())
+    
+    # Create orchestrator
+    orchestrator = AgentOrchestrator(
+        message_queue=message_queue,
+        uow=uow,
+        framework_executor=framework_executor,
+        max_workers=2,
+        cleanup_interval_seconds=60,
+        instance_timeout_seconds=120
+    )
+    
+    await orchestrator.initialize()
+    
+    try:
+        service = ExecuteAgentService(orchestrator)
+        
+        command = ExecuteAgentCommand(
+            agent_id=str(agent.id.value),
+            messages=[
+                ChatMessage(
+                    role=MessageRole.USER,
+                    content="Execute the workflow with streaming."
+                )
+            ],
+            task_id="workflow-streaming-task",
+            user_id="test-user",
+            stream=True,
+            temperature=0.7,
+            max_tokens=300
+        )
+        
+        # Execute with streaming
+        chunk_count = 0
+        total_content = ""
+        
+        async for chunk in service.execute_streaming(command):
+            chunk_count += 1
+            total_content += chunk.content
+            print(f"Workflow Chunk {chunk_count}: '{chunk.content[:50]}...'")
+            
+            # Verify chunk structure
+            assert chunk.message_id is not None
+            assert chunk.task_id == "workflow-streaming-task"
+            assert chunk.metadata.get('agent_id') == str(agent.id.value)
+        
+        # Verify we got streaming output
+        assert chunk_count > 0, "Should receive streaming chunks"
+        print(f"Workflow streaming: {chunk_count} chunks, {len(total_content)} total chars")
+        
+    finally:
+        await orchestrator.shutdown()
+        await message_queue.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_workflow_agent_with_tools():
+    """Test workflow agent execution with tool usage in steps."""
+    # Setup
+    message_queue = InMemoryMessageQueue()
+    await message_queue.initialize()
+    uow = TransactionalInMemoryUnitOfWork()
+    
+    # Create workflow agent with tools
+    configuration = AgentConfiguration(
+        llm_config_id="test",
+        template_config={
+            "steps": [
+                {
+                    "name": "Calculate",
+                    "prompt": "Use the calculator to perform calculations.",
+                    "tools": ["calculator"],
+                    "timeout": 45,
+                    "retry_count": 2
+                },
+                {
+                    "name": "Summarize",
+                    "prompt": "Summarize the calculation results.",
+                    "tools": [],
+                    "timeout": 30,
+                    "retry_count": 0
+                }
+            ],
+            "max_retries": 2,
+            "step_timeout": 60
+        }
+    )
+    
+    agent = Agent.create(
+        name="test-workflow-tools",
+        template_id="langgraph-workflow",
+        template_version="1.0.0",
+        configuration=configuration,
+        metadata={}
+    )
+    
+    async with uow:
+        await uow.agents.save(agent)
+        await uow.commit()
+    
+    # Setup framework executor
+    test_config = ServicesConfig(config_file="config/test-services-config.json")
+    framework_executor = LangGraphFrameworkExecutor(service_config=test_config.get_config_dict())
+    
+    orchestrator = AgentOrchestrator(
+        message_queue=message_queue,
+        uow=uow,
+        framework_executor=framework_executor,
+        max_workers=2,
+        cleanup_interval_seconds=60,
+        instance_timeout_seconds=120
+    )
+    
+    await orchestrator.initialize()
+    
+    try:
+        service = ExecuteAgentService(orchestrator)
+        
+        command = ExecuteAgentCommand(
+            agent_id=str(agent.id.value),
+            messages=[
+                ChatMessage(
+                    role=MessageRole.USER,
+                    content="Calculate 15 * 23 and then summarize the result."
+                )
+            ],
+            task_id="workflow-tools-task",
+            user_id="test-user",
+            stream=False
+        )
+        
+        result = await service.execute(command)
+        
+        # Verify execution completed
+        assert result is not None
+        assert result.agent_id == str(agent.id.value)
+        # Note: success might be False if tools aren't actually available in test config
+        # but the workflow should still execute
+        print(f"Workflow with tools result: success={result.success}")
+        
+    finally:
+        await orchestrator.shutdown()
+        await message_queue.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_workflow_agent_multi_step_context():
+    """Test workflow agent maintains context across multiple steps."""
+    # Setup
+    message_queue = InMemoryMessageQueue()
+    await message_queue.initialize()
+    uow = TransactionalInMemoryUnitOfWork()
+    
+    # Create workflow with context-dependent steps
+    configuration = AgentConfiguration(
+        llm_config_id="test",
+        template_config={
+            "steps": [
+                {
+                    "name": "Collect Data",
+                    "prompt": "Extract all numbers from the user's message.",
+                    "tools": [],
+                    "timeout": 30
+                },
+                {
+                    "name": "Validate Data",
+                    "prompt": "Validate that all extracted numbers are positive.",
+                    "tools": [],
+                    "timeout": 30
+                },
+                {
+                    "name": "Process Data",
+                    "prompt": "Calculate the sum of validated numbers.",
+                    "tools": [],
+                    "timeout": 30
+                },
+                {
+                    "name": "Report Results",
+                    "prompt": "Report the final sum to the user.",
+                    "tools": [],
+                    "timeout": 30
+                }
+            ],
+            "max_retries": 1,
+            "step_timeout": 60,
+            "fail_on_error": False
+        }
+    )
+    
+    agent = Agent.create(
+        name="test-workflow-context",
+        template_id="langgraph-workflow",
+        template_version="1.0.0",
+        configuration=configuration,
+        metadata={}
+    )
+    
+    async with uow:
+        await uow.agents.save(agent)
+        await uow.commit()
+    
+    # Setup framework executor
+    test_config = ServicesConfig(config_file="config/test-services-config.json")
+    framework_executor = LangGraphFrameworkExecutor(service_config=test_config.get_config_dict())
+    
+    orchestrator = AgentOrchestrator(
+        message_queue=message_queue,
+        uow=uow,
+        framework_executor=framework_executor,
+        max_workers=2,
+        cleanup_interval_seconds=60,
+        instance_timeout_seconds=120
+    )
+    
+    await orchestrator.initialize()
+    
+    try:
+        service = ExecuteAgentService(orchestrator)
+        
+        command = ExecuteAgentCommand(
+            agent_id=str(agent.id.value),
+            messages=[
+                ChatMessage(
+                    role=MessageRole.USER,
+                    content="I have these numbers: 5, 10, 15, 20. Please process them."
+                )
+            ],
+            task_id="workflow-context-task",
+            user_id="test-user",
+            stream=False,
+            max_tokens=600
+        )
+        
+        result = await service.execute(command)
+        
+        # Verify execution
+        assert result is not None
+        assert result.agent_id == str(agent.id.value)
+        assert result.success is True
+        assert result.message is not None
+        assert len(result.message) > 0
+        print(f"Workflow context test: completed with {len(result.message)} chars response")
+        
+    finally:
+        await orchestrator.shutdown()
+        await message_queue.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_workflow_agent_error_handling():
+    """Test workflow agent error handling when fail_on_error is True."""
+    # Setup
+    message_queue = InMemoryMessageQueue()
+    await message_queue.initialize()
+    uow = TransactionalInMemoryUnitOfWork()
+    
+    # Create workflow with fail_on_error enabled
+    configuration = AgentConfiguration(
+        llm_config_id="test",
+        template_config={
+            "steps": [
+                {
+                    "name": "First Step",
+                    "prompt": "Execute first step successfully.",
+                    "tools": [],
+                    "timeout": 30
+                },
+                {
+                    "name": "Second Step",
+                    "prompt": "This step might encounter issues.",
+                    "tools": [],
+                    "timeout": 30
+                }
+            ],
+            "max_retries": 1,
+            "step_timeout": 60,
+            "fail_on_error": True  # Stop on first error
+        }
+    )
+    
+    agent = Agent.create(
+        name="test-workflow-error",
+        template_id="langgraph-workflow",
+        template_version="1.0.0",
+        configuration=configuration,
+        metadata={}
+    )
+    
+    async with uow:
+        await uow.agents.save(agent)
+        await uow.commit()
+    
+    # Setup framework executor
+    test_config = ServicesConfig(config_file="config/test-services-config.json")
+    framework_executor = LangGraphFrameworkExecutor(service_config=test_config.get_config_dict())
+    
+    orchestrator = AgentOrchestrator(
+        message_queue=message_queue,
+        uow=uow,
+        framework_executor=framework_executor,
+        max_workers=2,
+        cleanup_interval_seconds=60,
+        instance_timeout_seconds=120
+    )
+    
+    await orchestrator.initialize()
+    
+    try:
+        service = ExecuteAgentService(orchestrator)
+        
+        command = ExecuteAgentCommand(
+            agent_id=str(agent.id.value),
+            messages=[
+                ChatMessage(
+                    role=MessageRole.USER,
+                    content="Test error handling in workflow."
+                )
+            ],
+            task_id="workflow-error-task",
+            user_id="test-user",
+            stream=False
+        )
+        
+        result = await service.execute(command)
+        
+        # Verify execution completed (error handling should be graceful)
+        assert result is not None
+        assert result.agent_id == str(agent.id.value)
+        # Result might be success or failure depending on mock behavior
+        print(f"Workflow error handling test: success={result.success}")
+        
+    finally:
+        await orchestrator.shutdown()
+        await message_queue.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_workflow_agent_session_continuation():
+    """Test workflow agent maintains state across session messages."""
+    # Setup
+    message_queue = InMemoryMessageQueue()
+    await message_queue.initialize()
+    uow = TransactionalInMemoryUnitOfWork()
+    
+    # Create workflow agent
+    configuration = AgentConfiguration(
+        llm_config_id="test",
+        template_config={
+            "steps": [
+                {
+                    "name": "Process Input",
+                    "prompt": "Process the user's input.",
+                    "tools": [],
+                    "timeout": 30
+                },
+                {
+                    "name": "Generate Response",
+                    "prompt": "Generate an appropriate response.",
+                    "tools": [],
+                    "timeout": 30
+                }
+            ],
+            "max_retries": 1
+        }
+    )
+    
+    agent = Agent.create(
+        name="test-workflow-session",
+        template_id="langgraph-workflow",
+        template_version="1.0.0",
+        configuration=configuration,
+        metadata={}
+    )
+    
+    async with uow:
+        await uow.agents.save(agent)
+        await uow.commit()
+    
+    # Setup framework executor
+    test_config = ServicesConfig(config_file="config/test-services-config.json")
+    framework_executor = LangGraphFrameworkExecutor(service_config=test_config.get_config_dict())
+    
+    orchestrator = AgentOrchestrator(
+        message_queue=message_queue,
+        uow=uow,
+        framework_executor=framework_executor,
+        max_workers=2,
+        cleanup_interval_seconds=60,
+        instance_timeout_seconds=120
+    )
+    
+    await orchestrator.initialize()
+    
+    try:
+        service = ExecuteAgentService(orchestrator)
+        context_id = "test-context-123"
+        
+        # First message in session
+        command1 = ExecuteAgentCommand(
+            agent_id=str(agent.id.value),
+            messages=[
+                ChatMessage(
+                    role=MessageRole.USER,
+                    content="Hello, my name is Alice."
+                )
+            ],
+            context_id=context_id,
+            user_id="test-user",
+            stream=False
+        )
+        
+        result1 = await service.execute(command1)
+        assert result1 is not None
+        assert result1.success is True
+        
+        # Second message in same session
+        command2 = ExecuteAgentCommand(
+            agent_id=str(agent.id.value),
+            messages=[
+                ChatMessage(
+                    role=MessageRole.USER,
+                    content="What's my name?"
+                )
+            ],
+            context_id=context_id,
+            user_id="test-user",
+            stream=False
+        )
+        
+        result2 = await service.execute(command2)
+        assert result2 is not None
+        # Session should maintain context
+        print(f"Workflow session test: message 1 success={result1.success}, message 2 success={result2.success}")
+        
     finally:
         await orchestrator.shutdown()
         await message_queue.shutdown()

@@ -445,6 +445,7 @@ class LangGraphFrameworkExecutor(FrameworkExecutor):
             raise ValueError(f"Template '{template_id}' not found. Available: {available}")
         
         template_class = self.template_classes[template_id]
+
         return template_class.validate_configuration(configuration)
     
     def template_exists(self, template_id: str) -> bool:
