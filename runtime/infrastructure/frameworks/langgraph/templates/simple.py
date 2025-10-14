@@ -1,19 +1,15 @@
 """Simple Test Agent Template - No external dependencies."""
 
-from collections.abc import AsyncGenerator
 from typing import Any, Optional
 
 from langgraph.prebuilt import create_react_agent
-from langgraph.graph.state import CompiledStateGraph
-from langchain_core.messages import BaseMessageChunk
 from pydantic import BaseModel, Field
 
 from runtime.infrastructure.frameworks.langgraph.llm.service import LangGraphLLMService
 from runtime.infrastructure.frameworks.langgraph.toolsets.service import LangGraphToolsetService
-from runtime.core.executors import StreamingChunk
 from runtime.domain.value_objects.agent_configuration import AgentConfiguration
 from runtime.domain.value_objects.chat_message import ChatMessage
-from .base import BaseLangGraphAgent
+from .base import BaseLangGraphChatAgent
 
 
 class SimpleTestAgentConfig(BaseModel):
@@ -27,7 +23,7 @@ class SimpleTestAgentConfig(BaseModel):
     )
 
 
-class SimpleTestAgent(BaseLangGraphAgent[SimpleTestAgentConfig]):
+class SimpleTestAgent(BaseLangGraphChatAgent[SimpleTestAgentConfig]):
     """Simple test agent template for validation - no external dependencies."""
 
     # Template metadata (class variables)
@@ -49,34 +45,12 @@ class SimpleTestAgent(BaseLangGraphAgent[SimpleTestAgentConfig]):
     ):
         """Initialize the simple test agent."""
         super().__init__(configuration, llm_service, toolset_service, metadata)
-        self._graph: CompiledStateGraph | None = None
         
         # Access configuration via the typed config object - no cast needed!
         self.response_prefix = self.config.response_prefix
         
         # Extract configuration values for LangGraph-specific setup
         self.system_prompt = self.system_prompt or self.config.system_prompt
-
-    def _get_llm_client(self, temperature: Optional[float] = None, max_tokens: Optional[int] = None):
-        """Get LLM client configured with execution parameters."""
-        execution_params = {}
-        
-        # Use effective parameters (template defaults vs execution overrides)
-        effective_temperature = temperature if temperature is not None else self.default_temperature
-        effective_max_tokens = max_tokens if max_tokens is not None else self.default_max_tokens
-        
-        if effective_temperature is not None:
-            execution_params["temperature"] = effective_temperature
-        if effective_max_tokens is not None:
-            execution_params["max_tokens"] = effective_max_tokens
-            
-        return self.llm_service.get_client(self.llm_config_id, **execution_params)
-
-    def _get_toolset_client(self):
-        """Get toolset client for this agent."""
-        if self.toolset_service and self.toolset_configs:
-            return self.toolset_service.create_client(self.toolset_configs)
-        return None
 
     async def _build_graph(self):
         """Build the execution graph for simple test agent."""
@@ -123,16 +97,3 @@ class SimpleTestAgent(BaseLangGraphAgent[SimpleTestAgentConfig]):
             content = self.response_prefix + content
             
         return content
-
-    async def _process_stream_chunk(
-        self,
-        chunk: BaseMessageChunk | Any,
-        chunk_index: int = 0,
-        metadata: Optional[dict[str, Any]] = None
-    ) -> AsyncGenerator[StreamingChunk, None]:
-        """Process streaming chunks for simple agent."""
-        # Leverage base implementation for standard processing
-        async for streaming_chunk in super()._process_stream_chunk(
-            chunk, chunk_index=chunk_index, metadata=metadata
-        ):            
-            yield streaming_chunk

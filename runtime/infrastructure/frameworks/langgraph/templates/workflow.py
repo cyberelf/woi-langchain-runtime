@@ -17,16 +17,20 @@ Each step is a natural language prompt together with configuration that will be 
 
 import logging
 from collections.abc import AsyncGenerator
-from math import e
-from typing import Any, Literal, Optional, Self, override
+from math import e, log
+from socket import AI_ADDRCONFIG
+from typing import Annotated, Any, Literal, Optional, Self, final, override
 from enum import Enum
 import uuid
 
-from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
+from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, AIMessage
 from langchain_core.tools import BaseTool
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, END, MessagesState
 from langgraph.prebuilt import ToolNode
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.graph.message import add_messages, RemoveMessage
+from langchain_core.messages.utils import trim_messages, count_tokens_approximately  
+
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import Select, over
 
@@ -35,7 +39,7 @@ from runtime.infrastructure.frameworks.langgraph.toolsets.service import LangGra
 from runtime.core.executors import StreamingChunk
 from runtime.domain.value_objects.chat_message import ChatMessage
 from runtime.domain.value_objects.agent_configuration import AgentConfiguration
-from .base import BaseLangGraphAgent
+from .base import BaseLangGraphTaskAgent
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +56,6 @@ class StepResult(str, Enum):
     FAILED = "failed"
     SKIPPED = "skipped"
     ERROR = "error"
-
 
 class WorkflowStepConfig(BaseModel):
     """Configuration for a single workflow step (immutable)."""
@@ -92,8 +95,10 @@ class WorkflowState(BaseModel):
     completed_steps: int = Field(default=0, description="Number of completed steps")
     failed_steps: int = Field(default=0, description="Number of failed steps")
     status: str = Field(default="running", description="Overall workflow status")
-    context: dict[str, Any] = Field(default_factory=dict, description="Shared context between steps")
-    messages: list[BaseMessage] = Field(default_factory=list, description="Conversation messages")
+    context: dict[str, Any] = Field(default_factory=dict, description="Shared context between steps")   # TODO: not used for now
+    messages: Annotated[list[BaseMessage], add_messages] = Field(default_factory=list, description="Conversation messages")
+    should_use_workflow: bool = Field(default=True, description="Whether to execute workflow steps or respond directly")
+    response: Optional[str] = Field(default=None, description="Final response - either from routing (direct response) or from last completed step")
 
 
 class WorkflowAgentConfig(BaseModel):
@@ -102,6 +107,15 @@ class WorkflowAgentConfig(BaseModel):
     steps: list[WorkflowStepConfig] = Field(
         ..., 
         description="name and description of each step"
+    )
+    workflow_responsibility: Optional[str] = Field(
+        default=None,
+        description="Description of what this workflow is responsible for. If provided, a routing node will check if the request is relevant before executing workflow steps."
+    )
+    history_size: int = Field(
+        default=10,
+        ge=0,
+        description="Number of previous messages to retain in context"
     )
     max_retries: int = Field(
         default=2, 
@@ -137,22 +151,24 @@ class WorkflowAgentConfig(BaseModel):
                         raise ValueError(f"Step '{step.name}' has invalid dependency '{dep}'")
         
         return v
-   
-
+    
 
 SYSTEM_PROMPT_TEMPLATE = """
 You are a workflow execution agent. You should complete the task step according to the workflow status.
 
-You need to follow the following setup:
+## Setpup Instructions:
 {system_prompt}
 
+## Workflow Steps
+You are strictly following the steps:
+{workflow_steps}
 
 ## Step Control Commands
-Control the current step execution by including one of these commandsin your response:
+Control the current step execution by including one of these commands at the end of your response:
 
-- **WORKING** - Continue to working on the current step  (default behavior)
-- **SUCCESS** - Mark this step as success and proceed to the next step
-- **FAIL** - Mark this step as failed
+- WORKING - Continue to working on the current step  (default behavior)
+- SUCCESS - Mark this step as success and proceed to the next step
+- FAIL - Mark this step as failed
 
 The command controls only the current step but NOT the entire workflow.
 The command should be on a separate line in your response.
@@ -160,25 +176,18 @@ The command should be on a separate line in your response.
 """
 
 USER_PROMPT_TEMPLATE = """
-Here is the overall workflow:
+Here is the overall workflow status:
 
-<workflow>
-{workflow_steps}
-</workflow>
+<workflow_status>
+{workflow_status}
+</workflow_status>
 
-The running context of the currentworkflow is:
+Now you are executing the step 
+<step>
+{step_name}: {step_prompt}
+</step>
 
-<context>
-{context}
-</context>
-
-Now you are executing the step {step_name}. And you need to finish the step according to the instructions.
-
-<step_instruction>
-{step_prompt}
-</step_instruction>
-
-The input of the step is:
+And you need to finish the step according to the user input.
 
 <input>
 {input}
@@ -186,7 +195,16 @@ The input of the step is:
 
 """
 
-class WorkflowAgent(BaseLangGraphAgent[WorkflowAgentConfig]):
+class WorkflowAgent(BaseLangGraphTaskAgent[WorkflowAgentConfig]):
+
+    @staticmethod
+    def strip_workflow_control_commands(text: str) -> str:
+        """Remove workflow control commands (SUCCESS, FAIL, WORKING) from text."""
+        if not text:
+            return ""
+        lines = text.splitlines()
+        filtered = [line for line in lines if line.strip() not in ("SUCCESS", "FAIL", "WORKING")]
+        return "\n".join(filtered).strip()
     """Workflow agent template that executes steps sequentially."""
     
     # Template metadata (class variables)
@@ -225,6 +243,7 @@ class WorkflowAgent(BaseLangGraphAgent[WorkflowAgentConfig]):
         self.max_retries = self.config.max_retries
         self.step_timeout = self.config.step_timeout
         self.fail_on_error = self.config.fail_on_error
+        self.history_size = self.config.history_size
 
     def _get_or_create_step_state(self, state: WorkflowState, step_id: str) -> WorkflowStepState:
         """Get or create a step state for the given step ID."""
@@ -237,8 +256,10 @@ class WorkflowAgent(BaseLangGraphAgent[WorkflowAgentConfig]):
         step_config = state.step_configs[state.current_step]
 
         workflow_status = ""
-        for step_cfg in self.workflow_step_configs:
-            workflow_status += f"{step_cfg.name}: {step_cfg.prompt}"
+        steps = ""
+        for step_cfg in self.workflow_step_configs[:state.current_step + 1]:
+            workflow_status += f"{step_cfg.name} "
+            steps += f"- {step_cfg.name}: {step_cfg.prompt}\n"
             
             # Get step state to check status
             step_state = state.step_states.get(step_cfg.id)
@@ -254,16 +275,17 @@ class WorkflowAgent(BaseLangGraphAgent[WorkflowAgentConfig]):
                         workflow_status += " [Error]"
                 elif step_state.status == StepStatus.RUNNING:
                     workflow_status += " [Running]"
-            
+                workflow_status += "\n"
+        
         system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
             system_prompt=self.system_prompt,
+            workflow_steps=steps
         )
         user_prompt = USER_PROMPT_TEMPLATE.format(
-            workflow_steps=workflow_status,
+            workflow_status=workflow_status.strip(),
             input=state.input,
             step_name=step_config.name,
-            step_prompt=step_config.prompt,
-            context=state.context
+            step_prompt=step_config.prompt
         )
 
         return system_prompt, user_prompt
@@ -294,17 +316,17 @@ class WorkflowAgent(BaseLangGraphAgent[WorkflowAgentConfig]):
         lines = response.split('\n')
         content = ""   # content without command
         for line in lines:
-            line = line.strip().upper()  # Case insensitive
+            stripped_line = line.strip()
 
-            if line == 'SUCCESS':
+            if stripped_line == 'SUCCESS':
                 result["step_control"] = "SUCCESS"
                 break  # SUCCESS takes precedence
                 
-            elif line == 'FAIL':
+            elif stripped_line == 'FAIL':
                 result["step_control"] = "FAIL"
                 break  # FAIL takes precedence
                 
-            elif line == 'WORKING':
+            elif stripped_line == 'WORKING':
                 result["step_control"] = "WORKING"
             else:
                 content += line + "\n"
@@ -316,8 +338,13 @@ class WorkflowAgent(BaseLangGraphAgent[WorkflowAgentConfig]):
         self, state: WorkflowState, result: BaseMessage
     ) -> WorkflowState:
         """Process step completion with workflow command parsing."""
-        # Parse LLM result for workflow state changes
+        # Parse LLM response message
         response = self._parse_message(result)
+        message = result.model_copy()
+        message.content = response["content"]
+        state.messages.append(message)
+
+        # Parse LLM result for workflow state changes
         step_config = state.step_configs[state.current_step]
         step_state = self._get_or_create_step_state(state, step_config.id)
         
@@ -328,6 +355,7 @@ class WorkflowAgent(BaseLangGraphAgent[WorkflowAgentConfig]):
             step_state.status = StepStatus.COMPLETED
             step_state.result = StepResult.SUCCESS
             step_state.result_content = response["content"]
+            state.response = response["content"]  # Store as final response
             
             if state.current_step >= len(state.step_configs) - 1:
                 # This was the last step
@@ -343,6 +371,7 @@ class WorkflowAgent(BaseLangGraphAgent[WorkflowAgentConfig]):
             step_state.status = StepStatus.COMPLETED
             step_state.result = StepResult.FAILED
             step_state.result_content = response["content"]
+            state.response = response["content"]  # Store as final response even on failure
             state.status = "failed"
             state.completed_steps += 1
             state.failed_steps += 1
@@ -380,12 +409,10 @@ class WorkflowAgent(BaseLangGraphAgent[WorkflowAgentConfig]):
             SystemMessage(content=system_prompt)
         ]
         # Optionally, prepend prior conversation history if needed
-        if hasattr(state, "messages") and state.messages:
-            # If state.messages exists, include it before the current prompts
-            logger.debug(f"💬 Including {len(state.messages)} previous messages in context")
-            prompt_messages = prompt_messages + state.messages + [HumanMessage(content=user_prompt)]
-        else:
-            prompt_messages.append(HumanMessage(content=user_prompt))
+        history_message = trim_messages(state.messages[-self.history_size:], strategy="last", max_tokens=1000, token_counter=count_tokens_approximately, start_on="human")
+
+        logger.debug(f"💬 Including {len(history_message)} previous messages in context")
+        prompt_messages = prompt_messages + history_message + [HumanMessage(content=user_prompt)]
 
         logger.debug(f"🤖 Invoking LLM for step '{step_config.name}' with {len(prompt_messages)} messages")
         
@@ -406,7 +433,6 @@ class WorkflowAgent(BaseLangGraphAgent[WorkflowAgentConfig]):
                     f"has tool_calls: {hasattr(result, 'tool_calls') and bool(getattr(result, 'tool_calls', None))}")
         
         # Add result to messages for potential tool processing
-        state.messages.append(result)
         state = self._process_step_completion(state, result)
         
         logger.info(f"✅ Step '{step_config.name}' completed (status: {step_state.status})")
@@ -435,9 +461,89 @@ class WorkflowAgent(BaseLangGraphAgent[WorkflowAgentConfig]):
         else:
             logger.debug(f"🔧 Tool calls detected, routing to tools")
             return "tools"
+        
+    async def _route_request_node(self, state: WorkflowState) -> WorkflowState | dict[str, bool]:
+        """Front-end routing node to determine if workflow is needed or direct response."""
+        # If no workflow_responsibility is configured, always use workflow
+        if not self.config.workflow_responsibility:
+            return {
+                "should_use_workflow": True
+            }
+        
+        return_state = {}
+        # Build routing prompt
+        system_prompt = f"""You are a routing assistant. Determine if the user's request is relevant to this workflow's responsibility.
+
+Workflow Responsibility: {self.config.workflow_responsibility}
+
+Instructions:
+1. If the request is relevant to the workflow's responsibility, respond with: WORKFLOW
+2. If the request is a simple greeting, off-topic, or can be answered directly without the workflow, respond with: DIRECT
+
+Then, if responding DIRECT, provide a brief, helpful response to the user.
+
+Format your response as:
+DECISION: [WORKFLOW or DIRECT]
+RESPONSE: [your response if DIRECT, or "N/A" if WORKFLOW]
+"""
+        
+        # Call LLM for routing decision
+        system_message = SystemMessage(content=system_prompt)
+        user_message = HumanMessage(content=state.input)
+        # Use minimal history for routing context
+        history_message = trim_messages(state.messages[-self.history_size:], strategy="last", max_tokens=1000, token_counter=count_tokens_approximately, start_on="human")
+
+        messages = [system_message] + history_message + [user_message]
+        
+        logger.info(f"🔀 Routing request to determine if workflow is needed")
+        result = await self.llm_client.ainvoke(messages)
+        
+        # Extract text content from result
+        response_text = result.content
+        
+        # Ensure response_text is a string
+        if isinstance(response_text, list):
+            # Join list items if it's a list
+            response_text = " ".join(str(item) for item in response_text)
+        elif not isinstance(response_text, str):
+            response_text = str(response_text)
+        
+        # Parse the response
+        decision = "WORKFLOW"  # Default to workflow
+        direct_response = ""
+        
+        lines = response_text.strip().split('\n')
+        for line in lines:
+            if line.startswith('DECISION:'):
+                decision = line.split(':', 1)[1].strip().upper()
+            elif line.startswith('RESPONSE:'):
+                direct_response = line.split(':', 1)[1].strip()
+            else:
+                direct_response += line + "\n"
+        
+        if decision == "DIRECT" and direct_response and direct_response != "N/A":
+            logger.info(f"✅ Routing decision: DIRECT response")
+            if result.id:
+                messages = [AIMessage(content=direct_response, id=result.id)]
+            else:
+                messages = [AIMessage(content=direct_response)]
+
+            return_state = {
+                "should_use_workflow": False,
+                "response": direct_response,  # Store direct response in 'response' field
+                "status": "completed",
+                "messages": messages
+            }
+        else:
+            logger.info(f"✅ Routing decision: WORKFLOW execution")
+            return_state = {
+                "should_use_workflow": True
+            }
+
+        return return_state
     
     async def _build_graph(self) -> CompiledStateGraph:
-        """Build the workflow execution graph with ToolNode for tool handling."""
+        """Build the workflow execution graph with optional routing and ToolNode for tool handling."""
         workflow = StateGraph(WorkflowState)
         
         # Get all possible tools for the workflow
@@ -445,6 +551,13 @@ class WorkflowAgent(BaseLangGraphAgent[WorkflowAgentConfig]):
         for step_config in self.workflow_step_configs:
             all_tool_names.extend(step_config.tools)
         all_tools = await self.get_tools(list(set(all_tool_names)))  # Remove duplicates
+        
+        # Add routing node if workflow_responsibility is configured
+        has_routing = bool(self.config.workflow_responsibility and self.config.workflow_responsibility.strip())
+        
+        if has_routing:
+            workflow.add_node("route_request", self._route_request_node)
+            workflow.set_entry_point("route_request")
         
         # Add step execution node
         workflow.add_node("execute_step", self._execute_step_node)
@@ -454,8 +567,20 @@ class WorkflowAgent(BaseLangGraphAgent[WorkflowAgentConfig]):
             tool_node = ToolNode(all_tools)
             workflow.add_node("tools", tool_node)
         
-        # Set entry point
-        workflow.set_entry_point("execute_step")
+        # Set entry point (either routing or direct to execute_step)
+        if not has_routing:
+            workflow.set_entry_point("execute_step")
+        
+        # Add conditional routing from route_request if enabled
+        if has_routing:
+            workflow.add_conditional_edges(
+                "route_request",
+                lambda state: "execute_step" if state.should_use_workflow else "end",
+                {
+                    "execute_step": "execute_step",
+                    "end": END
+                }
+            )
         
         # Add conditional routing after step execution
         if all_tools:
@@ -492,17 +617,27 @@ class WorkflowAgent(BaseLangGraphAgent[WorkflowAgentConfig]):
         for step_config in self.workflow_step_configs:
             step_states[step_config.id] = WorkflowStepState(step_id=step_config.id)
         
+        # Get the last user message as the input (most recent request)
+        # This ensures we process the current user message, not the first one in history
+        user_input = messages[-1].content if messages else ""
+        
         return WorkflowState(
-            input=messages[0].content,
+            input=user_input,
             step_configs=self.workflow_step_configs,
             step_states=step_states,
-            messages=self._convert_to_langgraph_messages(messages)
+            messages=self._convert_to_langgraph_messages(messages[-self.history_size:-1])
         )
 
     @override
     async def _extract_final_content(self, final_state: dict[str, Any]) -> str:
         """Extract content from workflow execution result."""
         state = WorkflowState.model_validate(final_state)
+        
+        # If we have a response (either from routing or last step), return it
+        if state.response:
+            return state.response
+        
+        # Otherwise, return workflow execution summary
         result_lines = [
             "Workflow Execution Summary:",
             f"Status: {state.status}",
@@ -526,7 +661,7 @@ class WorkflowAgent(BaseLangGraphAgent[WorkflowAgentConfig]):
                 
                 result_lines.append(f"{status_icon} {step_config.name}: {step_state.status}")
                 if step_state.result_content:
-                    result_lines.append(f"   Result: {step_state.result_content[:100]}...")
+                    result_lines.append(f"   Result: {step_state.result_content}")
                 if step_state.error:
                     result_lines.append(f"   Error: {step_state.error}")
             else:
@@ -535,52 +670,109 @@ class WorkflowAgent(BaseLangGraphAgent[WorkflowAgentConfig]):
         
         return "\n".join(result_lines)
 
-    async def _process_stream_chunk(
+    @override
+    async def _process_state_update(
         self, 
-        chunk: Any, 
+        state_update: dict[str, Any], 
         chunk_index: int = 0,
         metadata: Optional[dict[str, Any]] = None
     ) -> AsyncGenerator[StreamingChunk, None]:
-        """Process streaming chunks for workflow agent."""
+        """Process state updates for workflow agent.
         
-        # For workflow, we can provide step-by-step progress updates
-        if isinstance(chunk, WorkflowState):
-            current_step = chunk.current_step
-            if current_step < len(chunk.step_configs):
-                step_config = chunk.step_configs[current_step]
-                step_state = chunk.step_states.get(step_config.id)
+        This workflow agent streams progress as each step executes.
+        State updates contain the workflow state with current step information.
+        """
+        
+        # Extract workflow state from state updates
+        # State updates are dictionaries where keys are node names
+        for node_name, node_state in state_update.items():
+            logger.debug(f"🔄 Processing workflow node '{node_name}' with update: {node_state}")
+
+            # direct_response case (from routing node)
+            if node_name == "route_request" and isinstance(node_state, dict):
+                should_use_workflow = node_state.get("should_use_workflow", True)
+                response = node_state.get("response")
                 
-                # Yield step progress with simplified core format
-                if step_state:
-                    if step_state.status == StepStatus.RUNNING:
-                        content = f"🔄 Executing {step_config.name}..."
-                    elif step_state.status == StepStatus.COMPLETED:
-                        result_preview = step_state.result_content[:100] if step_state.result_content else 'No result'
-                        content = f"✅ {step_config.name}: Completed\n   Result: {result_preview}..."
-                    elif step_state.status == StepStatus.PENDING:
-                        content = f"{step_config.name}: Pending..."
-                    else:
-                        content = ""
-                else:
-                    content = f"{step_config.name}: Initializing..."
-                
-                if content:
+                if response:
+                    content = f"{response}\n"
                     yield StreamingChunk(
                         content=content,
-                        finish_reason=None,
+                        finish_reason="stop",
                         metadata={
                             'template_id': self.template_id,
                             'framework': 'langgraph',
+                            'stream_mode': 'updates',
                             'chunk_index': chunk_index,
-                            'step_name': step_config.name,
-                            'step_status': step_state.status if step_state else StepStatus.PENDING,
-                            'current_step': current_step,
-                            'total_steps': len(chunk.step_configs)
+                            'node': node_name,
+                            'should_use_workflow': should_use_workflow
                         }
                     )
-        else:
-            async for streaming_chunk in super()._process_stream_chunk(
-                chunk, chunk_index=chunk_index, metadata=metadata
-            ):            
-                yield streaming_chunk
+                
+                if not should_use_workflow:
+                    return  # End streaming as workflow is not used
+            
+            # Check if this is our workflow state
+            if isinstance(node_state, dict):
+                current_step = node_state.get("current_step")
+                step_configs: Optional[list[WorkflowStepConfig]] = node_state.get("step_configs")
+                step_states: dict[str, WorkflowStepState]= node_state.get("step_states", {})
+                final_status = node_state.get("status", "")
+                
+                if step_configs and step_states and current_step:
+                    step_config = step_configs[current_step]
+                    step_state = step_states.get(step_config.id)
+                    
+                    # Generate progress message based on step status
+                    if step_state:
+                        status = step_state.status
+                        step_name = step_config.name
+
+                        if status == StepStatus.RUNNING or status == StepStatus.PENDING:
+                            content = f"🔄 Executing {step_name}...\n"
+                        elif status == StepStatus.COMPLETED:
+                            content = f"✅ {step_name}: Completed\n"
+                        else:
+                            content = ""
+                        
+                        if content:
+                            yield StreamingChunk(
+                                content=content,
+                                finish_reason=None,
+                                metadata={
+                                    'template_id': self.template_id,
+                                    'framework': 'langgraph',
+                                    'stream_mode': 'updates',
+                                    'chunk_index': chunk_index,
+                                    'node': node_name,
+                                    'step_name': step_name,
+                                    'step_status': status,
+                                    'current_step': current_step,
+                                    'total_steps': len(step_configs)
+                                }
+                            )
+                    
+                    if final_status in ["completed", "failed"]:
+                        # Final completion message
+                        final_content = await self._extract_final_content(node_state)
+                        # yield the final content in parts to make the client render progressively
+                        while final_content:
+                            # Extract up to 100 chars
+                            chunk = final_content[:100]
+                            final_content = final_content[100:]
+                            
+                            yield StreamingChunk(
+                                content=chunk,
+                                finish_reason=None,
+                                metadata={
+                                    'template_id': self.template_id,
+                                    'framework': 'langgraph',
+                                    'stream_mode': 'updates', 
+                                    'chunk_index': chunk_index,
+                                    'node': node_name,
+                                    'final_status': final_status
+                                }
+                            )
+
+                        return  # End streaming as workflow is done
+            
     

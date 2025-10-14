@@ -124,8 +124,6 @@ class ChatCompletionResponse(BaseModel):
     choices: list[ChatChoice]
     created: int
     model: str
-    object: str = "chat.completion"
-    system_fingerprint: Optional[str] = None
     usage: ChatUsage
     metadata: Optional[dict] = Field(None, description="Additional execution metadata")
 
@@ -151,6 +149,7 @@ class StreamingChunk(BaseModel):
     model: str
     system_fingerprint: Optional[str] = None
     choices: list[StreamingChunkChoice]
+    metadata: Optional[dict] = Field(None, description="Additional execution metadata including task_id, context_id")
 
 
 # Backward compatibility aliases

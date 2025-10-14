@@ -33,8 +33,8 @@ class Settings(BaseSettings):
     max_conversation_history: int = Field(default=100, alias="MAX_CONVERSATION_HISTORY")
 
     # Execution timeouts
-    agent_execution_timeout: int = Field(default=30, alias="AGENT_EXECUTION_TIMEOUT")
-    llm_request_timeout: int = Field(default=60, alias="LLM_REQUEST_TIMEOUT")
+    agent_execution_timeout: int = Field(default=300, alias="AGENT_EXECUTION_TIMEOUT")
+    llm_request_timeout: int = Field(default=90, alias="LLM_REQUEST_TIMEOUT")
 
     # Logging
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")

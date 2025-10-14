@@ -289,8 +289,8 @@ async def create_client(
 class RuntimeClientContext:
     """Context manager for automatic client initialization and cleanup."""
     
-    def __init__(self, base_url: str = DEFAULT_BASE_URL, api_key: Optional[str] = None):
-        self._client = RuntimeClient(base_url=base_url, api_key=api_key)
+    def __init__(self, base_url: str = DEFAULT_BASE_URL, api_key: Optional[str] = None, timeout: float = 300.0):
+        self._client = RuntimeClient(base_url=base_url, api_key=api_key, timeout=timeout)
     
     async def __aenter__(self) -> "RuntimeClient":
         # No explicit initialization needed anymore.

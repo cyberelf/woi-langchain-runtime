@@ -4,7 +4,11 @@ This module contains all LangGraph-specific agent templates and provides
 utilities for template discovery and management.
 """
 
-from .base import BaseLangGraphAgent
+from .base import (
+    BaseLangGraphAgent,
+    BaseLangGraphChatAgent,
+    BaseLangGraphTaskAgent,
+)
 from .simple import SimpleTestAgent
 from .workflow import WorkflowAgent
 
@@ -50,6 +54,8 @@ def register_template(template_id: str, template_class: type) -> None:
 
 __all__ = [
     "BaseLangGraphAgent",
+    "BaseLangGraphChatAgent",
+    "BaseLangGraphTaskAgent",
     "SimpleTestAgent",
     "WorkflowAgent",
     "get_langgraph_templates",

@@ -354,7 +354,7 @@ class AgentOrchestrator:
             while True:
                 message = await self.message_queue.receive_message(
                     queue_name=stream_queue,
-                    timeout_seconds=30  # 30 second timeout
+                    timeout_seconds=300  # 5 minute timeout to accommodate long LLM responses
                 )
                 logger.debug(f"Stream message results: {message}")
                 
