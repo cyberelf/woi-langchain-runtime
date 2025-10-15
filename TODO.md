@@ -2,5 +2,5 @@
 - [ ] Add url feach tool which store the file into local tmp folder
 - [ ] Granular priviledge control of tools
 - [ ] Generate a document for AI
-- [ ] task is not stored in the repository
-
+- [ ] task store and revcovery
+- [ ] Documentation
