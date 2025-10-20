@@ -1,6 +1,6 @@
-"""File manipulation tools for agent functionality.
+"""File manipulation tools plugin.
 
-This module provides secure file operations including reading, writing, 
+This plugin provides secure file operations including reading, writing, 
 searching, and basic file management operations.
 """
 
@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import Optional, List, Any
 from langchain_core.tools import BaseTool
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +109,8 @@ class ReadLinesTool(BaseTool):
     description: str = "Read specific lines from a file. Provide filename and optionally start/end line numbers."
     args_schema: type[BaseModel] = ReadLinesInput
     
+    __version__ = "1.0.0"
+    
     def _run(self, filename: str, start: Optional[int] = 1, end: Optional[int] = None) -> str:
         """Read lines from a file.
         
@@ -173,6 +175,8 @@ class GrepFileTool(BaseTool):
     name: str = "grep_file"
     description: str = "Search for a regular expression pattern in a file and return matching lines."
     args_schema: type[BaseModel] = GrepFileInput
+    
+    __version__ = "1.0.0"
     
     def _run(self, filename: str, pattern: str, ignore_case: bool = False, line_numbers: bool = True) -> str:
         """Search for pattern in file.
@@ -245,6 +249,8 @@ class CreateFileTool(BaseTool):
     description: str = "Create a new file with specified content. Use overwrite=true to replace existing files."
     args_schema: type[BaseModel] = CreateFileInput
     
+    __version__ = "1.0.0"
+    
     def _run(self, filename: str, content: str, overwrite: bool = False) -> str:
         """Create file with content.
         
@@ -296,6 +302,8 @@ class DeleteFileTool(BaseTool):
     description: str = "Delete a file. Requires confirm=true to prevent accidental deletion."
     args_schema: type[BaseModel] = DeleteFileInput
     
+    __version__ = "1.0.0"
+    
     def _run(self, filename: str, confirm: bool = False) -> str:
         """Delete file.
         
@@ -334,21 +342,3 @@ class DeleteFileTool(BaseTool):
         except Exception as e:
             logger.error(f"Error deleting file {filename}: {e}")
             return f"Error deleting file: {e}"
-
-
-# Tool registry for easy access
-FILE_TOOLS = [
-    ReadLinesTool(),
-    GrepFileTool(),
-    CreateFileTool(),
-    DeleteFileTool(),
-]
-
-
-def get_file_tools() -> List[BaseTool]:
-    """Get all file manipulation tools.
-    
-    Returns:
-        List of file manipulation tools
-    """
-    return FILE_TOOLS.copy()

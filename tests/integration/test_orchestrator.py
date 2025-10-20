@@ -36,9 +36,30 @@ async def orchestrator_setup():
         await uow.commit()
     
     # Mock framework executor to avoid LangGraph dependencies
+    from runtime.core.executors import ExecutionResult, StreamingChunk
+    
     framework_executor = AsyncMock()
     framework_executor.name = "mock_framework"
     framework_executor.version = "1.0.0"
+    
+    # Mock the agent_executor with proper execute method that returns ExecutionResult
+    mock_agent_executor = AsyncMock()
+    mock_agent_executor.execute = AsyncMock(return_value=ExecutionResult(
+        success=True,
+        message="Mock response",
+        metadata={}
+    ))
+    
+    # Mock stream_execute to return an async generator
+    async def mock_stream_generator(*args, **kwargs):
+        """Mock async generator for streaming."""
+        yield StreamingChunk(content="Mock ", chunk_index=0)
+        yield StreamingChunk(content="stream ", chunk_index=1)
+        yield StreamingChunk(content="response", chunk_index=2, finish_reason="stop")
+    
+    mock_agent_executor.stream_execute = mock_stream_generator
+    
+    framework_executor.agent_executor = mock_agent_executor
     
     orchestrator = AgentOrchestrator(
         message_queue=message_queue,

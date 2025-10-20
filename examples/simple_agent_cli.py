@@ -29,31 +29,77 @@ async def main():
         # List available templates
         print("\n📋 Available Templates:")
         templates = await client.list_templates()
-        for template in templates:
-            print(f"  • {template.id} v{template.version} ({template.framework})")
-            print(f"    {template.description}")
+        if not templates:
+            print("  ❌ No templates found. Please ensure the runtime is running.")
+            return
+            
+        template_map = {}
+        for idx, template in enumerate(templates, 1):
+            print(f"  {idx}. {template.id} v{template.version} ({template.framework})")
+            print(f"     {template.description}")
+            template_map[str(idx)] = template
         
         print(f"\nFound {len(templates)} template(s)")
         
         # Let user select template type
-        print("\n🔧 Select Agent Type:")
-        print("  1. Simple Test Agent")
-        print("  2. Workflow Agent")
+        print("\n🔧 Select Agent Template:")
+        template_choice = input(f"Enter choice (1-{len(templates)}) [default: 1]: ").strip() or "1"
         
-        agent_type = input("\nEnter choice (1 or 2) [default: 1]: ").strip() or "1"
+        if template_choice not in template_map:
+            print(f"❌ Invalid choice. Defaulting to template 1.")
+            template_choice = "1"
         
-        if agent_type == "2":
-            # Create workflow agent
-            agent_id = "workflow-example"
-            template_id = "langgraph-workflow"
+        selected_template = template_map[template_choice]
+        template_id = selected_template.id
+        
+        # Available tools for selection
+        available_tools = [
+            "read-lines",
+            "create-file", 
+            "grep-file",
+            "delete-file",
+            "fetch-url",
+            "parse-url"
+        ]
+        
+        print("\n🛠️  Available Tools:")
+        print("  0. None (no tools)")
+        for idx, tool in enumerate(available_tools, 1):
+            print(f"  {idx}. {tool}")
+        
+        print("\nSelect tools to enable (comma-separated numbers, or 0 for none) [default: 0]: ")
+        tool_input = input("Tools: ").strip() or "0"
+        
+        selected_toolsets = []
+        if tool_input != "0":
+            try:
+                tool_indices = [int(x.strip()) for x in tool_input.split(",")]
+                for idx in tool_indices:
+                    if 1 <= idx <= len(available_tools):
+                        selected_toolsets.append(available_tools[idx - 1])
+            except ValueError:
+                print("❌ Invalid tool selection. No tools will be enabled.")
+        
+        if selected_toolsets:
+            print(f"✅ Enabled tools: {', '.join(selected_toolsets)}")
+        else:
+            print("✅ No tools enabled")
+        
+        # Configure agent based on selected template
+        agent_id = f"{template_id}-cli-example"
+        agent_name = f"{selected_template.id.replace('-', ' ').title()} CLI Agent"
+        agent_description = f"CLI demonstration agent using {template_id} template"
+        
+        # Build template config based on template type
+        if template_id == "langgraph-workflow":
             template_config = {
-                "workflow_responsibility": "Analyzing and responding to technical questions about programming, coding, software development, and computer science topics. This workflow is designed for multi-step technical analysis and code generation tasks.",
+                "workflow_responsibility": "Analyzing and responding to user questions with multi-step processing.",
                 "steps": [
                     {
                         "name": "Step 1: Analyze Request",
                         "prompt": "Analyze the user's request and identify key requirements.",
-                        "tools": [],
-                        "timeout": 60 ,
+                        "tools": selected_toolsets,
+                        "timeout": 60,
                         "retry_count": 1
                     },
                     {
@@ -68,20 +114,23 @@ async def main():
                 "step_timeout": 60,
                 "fail_on_error": False
             }
-            agent_name = "Workflow CLI Agent"
-            agent_description = "A workflow agent for CLI demonstration"
             system_prompt = "You are a helpful workflow assistant that processes requests step by step."
-        else:
-            # Create simple test agent
-            agent_id = "simple-test-example"
-            template_id = "simple-test"
+        elif template_id == "simple-test":
             template_config = {
                 "response_prefix": "🤖 ",
                 "system_prompt": "You are a helpful assistant that responds to user questions."
             }
-            agent_name = "Simple Test CLI Agent"
-            agent_description = "A simple test agent for CLI demonstration"
             system_prompt = "You are a helpful assistant that responds to user questions."
+        elif template_id == "test-plugin-agent":
+            template_config = {
+                "greeting": "Hello from plugin agent!",
+                "max_iterations": 10
+            }
+            system_prompt = "You are a test plugin agent demonstrating the plugin system."
+        else:
+            # Generic config for unknown templates
+            template_config = {}
+            system_prompt = "You are a helpful assistant."
         
         # Check existing agents
         print("\n🤖 Existing Agents:")
@@ -102,8 +151,17 @@ async def main():
         
         if existing_agent:
             print(f"\n✅ Using existing agent: {existing_agent.name}")
-            agent_info = existing_agent
-        else:
+            
+            # Ask if user wants to recreate with new config
+            recreate = input("Do you want to recreate with new configuration? (y/N): ").strip().lower()
+            if recreate == 'y':
+                print(f"🗑️  Deleting existing agent...")
+                await client.delete_agent(agent_id)
+                existing_agent = None
+            else:
+                agent_info = existing_agent
+        
+        if not existing_agent:
             print(f"\n🔧 Creating new {agent_name}...")
             
             # Create agent configuration
@@ -117,7 +175,7 @@ async def main():
                 template_config=template_config,
                 system_prompt=system_prompt,
                 llm_config_id="deepseek",
-                toolsets=[],
+                toolsets=selected_toolsets,
                 conversation_config={},
                 agent_line_id=None,  # Will be auto-populated from id by validator
                 version_type="beta",
@@ -135,6 +193,13 @@ async def main():
         print(f"   Name: {agent_info.name}")
         print(f"   Template: {agent_info.template_id} v{agent_info.template_version}")
         print(f"   Status: {agent_info.status}")
+        
+        # Get toolsets from configuration
+        toolsets = agent_info.configuration.get('toolsets', [])
+        if toolsets:
+            print(f"   Tools: {', '.join(toolsets)}")
+        else:
+            print(f"   Tools: None")
         
         # Interactive CLI loop
         print("\n💬 Interactive Chat Session")

@@ -57,6 +57,14 @@ class TestChatModel(BaseChatModel):
             message = AIMessageChunk(content=content)
             yield ChatGenerationChunk(message=message)
 
+    def bind_tools(self, tools, **kwargs):
+        """Mock implementation of bind_tools for testing.
+        
+        Returns self to allow the agent to work with tools during testing.
+        """
+        # Simply return self - tools will be stored but not actually used in test mode
+        return self
+
 @dataclass
 class LLMConfiguration:
     """Simple LLM configuration for testing."""

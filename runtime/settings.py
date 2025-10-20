@@ -82,6 +82,18 @@ class Settings(BaseSettings):
         default="config/services-config.json", alias="SERVICES_CONFIG_FILE"
     )
     services_config_json: str = Field(default="{}", alias="SERVICES_CONFIG")  # Fallback JSON string
+    
+    # Plugin system configuration
+    plugin_root_dir: str = Field(default="plugins", alias="PLUGIN_ROOT_DIR")
+    plugin_agents_dir: str = Field(default="agents", alias="PLUGIN_AGENTS_DIR")  # Relative to plugin_root_dir
+    plugin_tools_dir: str = Field(default="tools", alias="PLUGIN_TOOLS_DIR")  # Relative to plugin_root_dir
+    
+    # Optional: Custom absolute directories (override defaults)
+    custom_agents_dir: Optional[str] = Field(default=None, alias="CUSTOM_AGENTS_DIR")
+    custom_tools_dir: Optional[str] = Field(default=None, alias="CUSTOM_TOOLS_DIR")
+    
+    # Feature flag
+    enable_plugin_discovery: bool = Field(default=True, alias="ENABLE_PLUGIN_DISCOVERY")
 
     model_config = SettingsConfigDict(
         env_file=".env",

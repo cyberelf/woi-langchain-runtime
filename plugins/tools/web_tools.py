@@ -1,6 +1,6 @@
-"""Web interaction tools for agent functionality.
+"""Web interaction tools plugin.
 
-This module provides secure web operations including URL fetching,
+This plugin provides secure web operations including URL fetching,
 content downloading, and basic web interaction capabilities.
 """
 
@@ -14,7 +14,7 @@ from urllib.parse import urlparse, urljoin
 import aiohttp
 import asyncio
 from langchain_core.tools import BaseTool
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +108,8 @@ class FetchUrlTool(BaseTool):
     name: str = "fetch_url"
     description: str = "Fetch content from a URL and save to a temporary file or return directly."
     args_schema: type[BaseModel] = FetchUrlInput
+    
+    __version__ = "1.0.0"
     
     def _run(self, url: str, save_to_file: bool = True, follow_redirects: bool = True, headers: Optional[Dict[str, str]] = None) -> str:
         """Fetch URL content.
@@ -250,6 +252,8 @@ class ParseUrlTool(BaseTool):
     description: str = "Parse a URL and return its components (scheme, domain, path, etc.)"
     args_schema: type[BaseModel] = ParseUrlInput
     
+    __version__ = "1.0.0"
+    
     def _run(self, url: str) -> str:
         """Parse URL and return components.
         
@@ -291,19 +295,3 @@ class ParseUrlTool(BaseTool):
             
         except Exception as e:
             return f"Error parsing URL: {e}"
-
-
-# Tool registry for web tools
-WEB_TOOLS = [
-    FetchUrlTool(),
-    ParseUrlTool(),
-]
-
-
-def get_web_tools() -> list[BaseTool]:
-    """Get all web interaction tools.
-    
-    Returns:
-        List of web interaction tools
-    """
-    return WEB_TOOLS.copy()

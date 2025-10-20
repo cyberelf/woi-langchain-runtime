@@ -65,76 +65,81 @@ class LLMConfig(BaseModel):
         return self.providers[provider_name]
 
 
-class ToolsetServerConfig(BaseModel):
-    """Configuration for an MCP server."""
+class MCPServerConfig(BaseModel):
+    """Configuration for a single MCP server following LangChain MCP spec.
+    
+    See: https://docs.langchain.com/oss/python/langchain/mcp
+    """
     
     name: str = Field(..., description="Server name")
-    command: str = Field(..., description="Command to start the server")
-    args: list[str] = Field(default_factory=list, description="Command arguments")
+    transport: Literal["stdio", "streamable_http", "sse"] = Field(
+        default="stdio", description="Transport type"
+    )
+    url: Optional[str] = Field(default=None, description="URL for HTTP-based transports")
+    command: Optional[str] = Field(default=None, description="Command to start the server (for stdio)")
+    args: list[str] = Field(default_factory=list, description="Command arguments (for stdio)")
     env: dict[str, str] = Field(default_factory=dict, description="Environment variables")
+    timeout: int = Field(30, gt=0, description="Operation timeout in seconds")
+    
+    @model_validator(mode="after")
+    def validate_transport_requirements(self):
+        """Validate that required fields are provided for each transport type."""
+        if self.transport == "stdio" and not self.command:
+            raise ValueError("Command is required for stdio transport")
+        if self.transport in ["streamable_http", "sse"] and not self.url:
+            raise ValueError(f"URL is required for {self.transport} transport")
+        return self
 
 
-class ToolsetConfig(BaseModel):
-    """Configuration for a single toolset."""
+class MCPToolsetConfig(BaseModel):
+    """Configuration for MCP-based toolsets."""
     
-    type: Literal["mcp", "custom"] = Field(..., description="Toolset type")
-    config: dict[str, Any] = Field(default_factory=dict, description="Toolset-specific configuration")
+    servers: list[MCPServerConfig] = Field(
+        default_factory=list, description="List of MCP servers"
+    )
     
-    @field_validator("config")
-    def validate_config_by_type(cls, v):
-        """Validate configuration based on toolset type."""
-        toolset_type = v.get("type")
-        
-        if toolset_type == "mcp":
-            # Validate MCP configuration
-            if "servers" in v:
-                servers = v["servers"]
-                if not isinstance(servers, list):
-                    raise ValueError("MCP servers must be a list")
-                
-                # Validate each server configuration
-                for i, server in enumerate(servers):
-                    try:
-                        ToolsetServerConfig(**server)
-                    except Exception as e:
-                        raise ValueError(f"Invalid MCP server config at index {i}: {e}")
-            
-            # Set default timeout if not provided
-            if "timeout" not in v:
-                v["timeout"] = 30
-                
-        elif toolset_type == "custom":
-            # Validate custom toolset configuration
-            if "tools_directory" not in v:
-                v["tools_directory"] = "./tools"
-            if "auto_discovery" not in v:
-                v["auto_discovery"] = False
-                
+    @field_validator("servers")
+    def validate_servers(cls, v):
+        """Validate that at least one server is configured."""
+        if not v:
+            raise ValueError("At least one MCP server must be configured")
         return v
 
 
 class ToolsetsConfig(BaseModel):
     """Toolsets configuration for LangGraph framework."""
     
-    toolsets: dict[str, ToolsetConfig] = Field(
-        default_factory=dict, description="Available toolsets"
+    mcp: dict[str, MCPToolsetConfig] = Field(
+        default_factory=dict, description="MCP-based toolsets"
+    )
+    custom: list[str] | Literal["all"] = Field(
+        "all", description="Custom tool names or 'all' for all plugins"
     )
     default_toolsets: list[str] = Field(
         default_factory=list, description="Default toolset names to load"
     )
     
+    @field_validator("custom")
+    def validate_custom(cls, v):
+        """Validate custom tools configuration."""
+        if isinstance(v, str) and v != "all":
+            raise ValueError("custom must be either a list of tool names or 'all'")
+        if isinstance(v, list) and not v:
+            raise ValueError("custom list cannot be empty")
+        return v
+    
     @model_validator(mode="after")
     def validate_default_toolsets(self):
-        """Validate that default toolsets exist in toolsets."""
+        """Validate that default toolsets exist in mcp toolsets."""
         if self.default_toolsets:
             for name in self.default_toolsets:
-                if name not in self.toolsets:
-                    raise ValueError(f"Default toolset {name} not found in toolsets")
+                if name not in self.mcp:
+                    raise ValueError(f"Default toolset {name} not found in mcp toolsets")
         return self
     
-    def get_toolset_config(self, toolset_name: str) -> Optional[ToolsetConfig]:
-        """Get configuration for a specific toolset."""
-        return self.toolsets.get(toolset_name)
+    def get_mcp_toolset(self, toolset_name: str) -> Optional[MCPToolsetConfig]:
+        """Get MCP toolset configuration by name."""
+        return self.mcp.get(toolset_name)
 
 
 class LangGraphFrameworkConfig(BaseModel):

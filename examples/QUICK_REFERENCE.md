@@ -12,18 +12,47 @@ export OPENAI_API_KEY="your-key"
 python examples/simple_agent_cli.py
 ```
 
-## Agent Types
+## CLI Features (NEW!)
 
-### Simple Test Agent (Option 1)
-- Single-turn conversations
-- Quick Q&A
-- Simple response formatting
+✨ **Dynamic Template Discovery** - Automatically lists all available agent templates
+🛠️ **Tool Selection** - Choose which tools to enable (file ops, web tools, etc.)
+🔄 **Agent Recreation** - Update existing agents with new configurations
+📊 **Enhanced Display** - See configured tools and agent details
 
-### Workflow Agent (Option 2)
+## Agent Templates
+
+The CLI discovers all available templates automatically. Common templates:
+
+### Simple Test Agent (`simple-test`)
+- Basic conversational agent
+- Configurable response prefix
+- Good for testing and simple interactions
+
+### Workflow Agent (`langgraph-workflow`)
 - Multi-step processing
-- Step 1: Analyze Request
+- Step 1: Analyze Request (with selected tools)
 - Step 2: Generate Response
-- Progress tracking
+- Progress tracking and error handling
+
+### Test Plugin Agent (`test-plugin-agent`)
+- Example plugin-based agent
+- Demonstrates plugin system
+- Customizable greeting
+
+## Available Tools
+
+Select from 6 built-in tools:
+
+| # | Tool | Description |
+|---|------|-------------|
+| 1 | read-lines | Read specific lines from files |
+| 2 | create-file | Create new files with content |
+| 3 | grep-file | Search for patterns in files |
+| 4 | delete-file | Delete files |
+| 5 | fetch-url | Fetch content from URLs |
+| 6 | parse-url | Parse and extract data from URLs |
+
+**Selection Format**: Enter comma-separated numbers (e.g., "1,3,5") or "0" for no tools
 
 ## Commands
 

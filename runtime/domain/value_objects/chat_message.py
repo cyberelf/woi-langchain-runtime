@@ -1,7 +1,7 @@
 """Chat message value object - Pure domain model."""
 
 from dataclasses import dataclass, field
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
@@ -25,7 +25,7 @@ class ChatMessage:
     
     role: MessageRole
     content: str
-    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = field(default_factory=dict)
     
     def __post_init__(self):
@@ -44,7 +44,7 @@ class ChatMessage:
         return cls(
             role=MessageRole.USER,
             content=content,
-            timestamp=datetime.now(UTC),
+            timestamp=datetime.now(timezone.utc),
             metadata=metadata or {}
         )
     
@@ -54,7 +54,7 @@ class ChatMessage:
         return cls(
             role=MessageRole.ASSISTANT,
             content=content,
-            timestamp=datetime.now(UTC),
+            timestamp=datetime.now(timezone.utc),
             metadata=metadata or {}
         )
     
@@ -64,7 +64,7 @@ class ChatMessage:
         return cls(
             role=MessageRole.SYSTEM,
             content=content,
-            timestamp=datetime.now(UTC),
+            timestamp=datetime.now(timezone.utc),
             metadata=metadata or {}
         )
     

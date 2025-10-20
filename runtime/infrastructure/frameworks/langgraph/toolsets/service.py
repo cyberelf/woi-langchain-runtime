@@ -11,7 +11,7 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 
 # Removed domain abstraction - using concrete implementation
 
-from ..config import ToolsetsConfig, ToolsetConfig
+from ..config import ToolsetsConfig, MCPToolsetConfig
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +30,14 @@ class LangGraphToolsetService:
         
         if toolsets_config is None:
             # Create default configuration
-            self._toolsets_config = ToolsetsConfig()
+            self._toolsets_config = ToolsetsConfig(mcp={}, custom="all")
         else:   
             # Use pydantic config directly
             self._toolsets_config = toolsets_config
 
         logger.info(
-            f"LangGraphToolsetService initialized with {len(self._toolsets_config.toolsets)} "
-            f"toolset configurations"
+            f"LangGraphToolsetService initialized with {len(self._toolsets_config.mcp)} "
+            f"MCP toolsets and custom tools: {self._toolsets_config.custom}"
         )
     
     def create_client(self, toolset_names: list[str]) -> "LangGraphToolsetClient":
@@ -68,82 +68,159 @@ class LangGraphToolsetClient:
 
     async def _get_tools(self) -> list[BaseTool]:
         """Get LangGraph-compatible tools."""
-        tools = []
         if self._tools is None:
             self._tools = []
+            
             for name in self.toolset_names:
-                if name in self.toolsets_config.toolsets:
-                    config = self.toolsets_config.toolsets[name]
-                    if config.type == "mcp":
-                        # Handle MCP toolsets
-                        mcp_tools = await self._get_mcp_tools(name, config)
-                        self._tools.extend(mcp_tools)
-                    elif config.type == "custom":
-                        # Handle custom toolsets
-                        custom_tools = await self._get_custom_tools(name, config)
-                        self._tools.extend(custom_tools)
-                    logger.debug(f"Loaded tools from toolset '{name}'")
+                # Check if it's an MCP toolset
+                if name in self.toolsets_config.mcp:
+                    mcp_config = self.toolsets_config.mcp[name]
+                    mcp_tools = await self._get_mcp_tools(name, mcp_config)
+                    self._tools.extend(mcp_tools)
+                    logger.debug(f"Loaded MCP tools from toolset '{name}'")
+                # Check if it's a special "custom" keyword for custom tools
+                elif name == "custom":
+                    custom_tools = await self._get_custom_tools()
+                    self._tools.extend(custom_tools)
+                    logger.debug(f"Loaded custom tools")
                 else:
                     logger.warning(f"No configuration found for toolset '{name}', skipping")
         
-        return tools
+        return self._tools
     
-    async def _get_mcp_tools(self, name: str, config: ToolsetConfig) -> list[BaseTool]:
+    async def _get_mcp_tools(self, name: str, config: MCPToolsetConfig) -> list[BaseTool]:
         """Get tools from MCP toolset."""
         try:
-            client = MultiServerMCPClient(config.config)
+            # Build connections dict following LangChain MCP spec
+            connections: dict[str, Any] = {}
+            for server in config.servers:
+                # Create appropriate connection dict based on transport type
+                if server.transport == "stdio":
+                    assert server.command is not None, "Command required for stdio transport"
+                    connection = {
+                        "transport": "stdio",
+                        "command": server.command,
+                        "args": server.args,
+                        "env": server.env
+                    }
+                elif server.transport == "streamable_http":
+                    assert server.url is not None, "URL required for streamable_http transport"
+                    connection = {
+                        "transport": "streamable_http",
+                        "url": server.url,
+                        "headers": server.env  # Pass env vars as headers
+                    }
+                elif server.transport == "sse":
+                    assert server.url is not None, "URL required for SSE transport"
+                    connection = {
+                        "transport": "sse",
+                        "url": server.url,
+                        "headers": server.env  # Pass env vars as headers
+                    }
+                else:
+                    logger.warning(f"Unknown transport type: {server.transport}")
+                    continue
+                
+                connections[server.name] = connection
+            
+            if not connections:
+                logger.warning(f"No valid MCP connections configured for {name}")
+                return []
+            
+            client = MultiServerMCPClient(connections)
             return await client.get_tools()
         except Exception as e:
             logger.warning(f"Failed to get MCP tools from {name}: {e}")
             return []
     
-    async def _get_custom_tools(self, name: str, config: ToolsetConfig) -> list[BaseTool]:
-        """Get tools from custom toolset."""
-        logger.info(f"Loading custom tools from {name}")
+    async def _get_custom_tools(self) -> list[BaseTool]:
+        """Get tools from custom toolset configuration."""
+        logger.info(f"Loading custom tools")
         
-        # Handle built-in toolsets
-        if name == "file_tools":
-            try:
-                from runtime.infrastructure.tools.file_tools import get_file_tools
-                tools = get_file_tools()
-                logger.info(f"Loaded {len(tools)} file manipulation tools")
-                return tools
-            except Exception as e:
-                logger.error(f"Failed to load file tools: {e}")
-                return []
+        custom_config = self.toolsets_config.custom
         
-        elif name == "web_tools":
-            try:
-                from runtime.infrastructure.tools.web_tools import get_web_tools
-                tools = get_web_tools()
-                logger.info(f"Loaded {len(tools)} web interaction tools")
-                return tools
-            except Exception as e:
-                logger.error(f"Failed to load web tools: {e}")
-                return []
+        # Check if it's "all" - load all plugin tools
+        if custom_config == "all":
+            return await self._get_all_plugin_tools()
         
-        elif name == "essential_tools":
-            # Combined essential toolset with file and web tools
-            try:
-                from runtime.infrastructure.tools.file_tools import get_file_tools
-                from runtime.infrastructure.tools.web_tools import get_web_tools
-                
-                tools = []
-                tools.extend(get_file_tools())
-                tools.extend(get_web_tools())
-                
-                logger.info(f"Loaded {len(tools)} essential tools (file + web)")
-                return tools
-            except Exception as e:
-                logger.error(f"Failed to load essential tools: {e}")
-                return []
-        
-        # Handle other custom toolsets from configuration
-        tools_directory = config.config.get("tools_directory", "./tools")
-        auto_discovery = config.config.get("auto_discovery", False)
-        
-        if auto_discovery:
-            # Future: implement tool discovery from directory
-            logger.info(f"Auto-discovery from {tools_directory} not yet implemented")
+        # Otherwise, it's a list of specific tool names
+        if isinstance(custom_config, list):
+            return await self._resolve_tool_list(custom_config)
         
         return []
+    
+    async def _resolve_tool_list(self, tool_names: list[str]) -> list[BaseTool]:
+        """Resolve tools from explicit tool name list (plugins only).
+        
+        Args:
+            tool_names: List of tool names to load
+            
+        Returns:
+            List of instantiated tool objects
+        """
+        from runtime.settings import settings
+        
+        tools = []
+        
+        for tool_name in tool_names:
+            tool_instance = None
+            
+            # Try plugin registry
+            if settings.enable_plugin_discovery:
+                try:
+                    from runtime.core.plugin import get_plugin_registry
+                    registry = get_plugin_registry()
+                    plugin_meta = registry.get_tool(tool_name)
+                    
+                    if plugin_meta:
+                        try:
+                            tool_instance = plugin_meta.class_obj()
+                            logger.debug(f"Loaded plugin tool: {tool_name}")
+                        except Exception as e:
+                            logger.error(f"Failed to instantiate plugin tool '{tool_name}': {e}")
+                except ImportError:
+                    logger.error("Plugin system not available")
+            else:
+                logger.warning("Plugin discovery disabled, cannot load tools")
+            
+            if tool_instance:
+                tools.append(tool_instance)
+            else:
+                logger.warning(f"Tool '{tool_name}' not found in plugin registry")
+        
+        logger.info(f"Resolved {len(tools)}/{len(tool_names)} tools from plugin registry")
+        return tools
+    
+    async def _get_all_plugin_tools(self) -> list[BaseTool]:
+        """Get all available plugin tools via auto-discovery.
+        
+        Returns:
+            List of all registered plugin tool instances
+        """
+        from runtime.settings import settings
+        
+        if not settings.enable_plugin_discovery:
+            logger.warning("Plugin discovery disabled, no plugin tools available")
+            return []
+        
+        try:
+            from runtime.core.plugin import get_plugin_registry
+            registry = get_plugin_registry()
+            
+            tools = []
+            for tool_metadata in registry.list_tools():
+                try:
+                    tool_instance = tool_metadata.class_obj()
+                    tools.append(tool_instance)
+                    logger.debug(f"Auto-discovered plugin tool: {tool_metadata.plugin_id}")
+                except Exception as e:
+                    logger.error(
+                        f"Failed to instantiate plugin tool '{tool_metadata.plugin_id}': {e}"
+                    )
+            
+            logger.info(f"Auto-discovered {len(tools)} plugin tools")
+            return tools
+            
+        except ImportError:
+            logger.warning("Plugin system not available")
+            return []

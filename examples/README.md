@@ -4,15 +4,18 @@ This directory contains examples demonstrating how to use the LangChain Runtime 
 
 ## Simple Agent CLI Example
 
-The `simple_agent_cli.py` script provides an interactive command-line interface for working with both simple and workflow agents.
+The `simple_agent_cli.py` script provides an interactive command-line interface for working with agents from the runtime system.
 
 ### Features
 
-- **Multiple Agent Types**: Choose between simple test agents and workflow agents
+- **Dynamic Agent Discovery**: Automatically discovers and lists all available agent templates (built-in + plugins)
+- **Agent Selection**: Choose from any available agent template at runtime
+- **Tool Selection**: Select which tools to enable for your agent (file operations, web tools, etc.)
 - **Task Management**: Automatic task ID tracking for stateful conversations
 - **Streaming Support**: Toggle between streaming and non-streaming responses
 - **Interactive Commands**: Control conversation flow with simple commands
 - **Context Preservation**: Maintain task and context IDs across messages
+- **Agent Recreation**: Option to recreate existing agents with new configurations
 
 ### Prerequisites
 
@@ -35,30 +38,52 @@ Run the example:
 python examples/simple_agent_cli.py
 ```
 
-### Agent Types
+The CLI will guide you through:
+1. **Template Selection**: Choose from all available agent templates (built-in and plugins)
+2. **Tool Selection**: Pick which tools to enable (file operations, web tools, or none)
+3. **Agent Creation**: Automatically creates or reuses an existing agent
+4. **Interactive Chat**: Start chatting with your configured agent
 
-#### 1. Simple Test Agent
-A straightforward agent that responds to user queries with a configurable response prefix.
+### Available Templates
 
-**Configuration:**
-- Template ID: `simple-test`
-- Response prefix: `🤖 `
-- Simple conversational interface
+The CLI automatically discovers all available templates from the runtime. Common templates include:
 
-#### 2. Workflow Agent
-A multi-step agent that processes requests through a defined workflow.
+#### Built-in Templates
 
-**Configuration:**
-- Template ID: `langgraph-workflow`
-- Default steps:
-  1. **Analyze Request**: Identifies key requirements
-  2. **Generate Response**: Creates comprehensive response
+**1. Simple Test Agent** (`simple-test`)
+- Basic conversational agent
+- Configurable response prefix
+- Good for testing and simple interactions
 
-**Workflow Features:**
-- Sequential step execution
-- Progress tracking
-- Error handling with retries
-- Step-level timeout control
+**2. Workflow Agent** (`langgraph-workflow`)
+- Multi-step processing pipeline
+- Configurable workflow steps
+- Each step can have its own tools and timeout
+- Supports retries and error handling
+
+#### Plugin Templates
+
+**3. Test Plugin Agent** (`test-plugin-agent`)
+- Example plugin-based agent
+- Demonstrates the plugin system
+- Customizable greeting and iteration limits
+
+*Additional templates may be available depending on installed plugins*
+
+### Available Tools
+
+The CLI allows you to select from the following tools:
+
+| Tool | ID | Description |
+|------|-----|-------------|
+| Read Lines | `read-lines` | Read specific lines from files |
+| Create File | `create-file` | Create new files with content |
+| Grep File | `grep-file` | Search for patterns in files |
+| Delete File | `delete-file` | Delete files |
+| Fetch URL | `fetch-url` | Fetch content from URLs |
+| Parse URL | `parse-url` | Parse and extract data from URLs |
+
+**Note**: For workflow agents, tools are assigned to specific workflow steps.
 
 ### Interactive Commands
 
@@ -70,6 +95,63 @@ During a chat session, you can use the following commands:
 | `stream` | Toggle between streaming and non-streaming mode |
 | `clear` | Clear conversation history and reset task |
 | `newtask` | Start a new task (resets task ID while keeping history) |
+
+### Example Session
+
+```
+🚀 Agent CLI Example (using Client SDK, timeout=300.0s)
+============================================================
+
+📋 Available Templates:
+  1. simple-test v1.0.0 (langgraph)
+     A simple test agent for development and testing.
+  2. langgraph-workflow v1.0.0 (langgraph)
+     A workflow agent that processes tasks through multiple steps.
+  3. test-plugin-agent v1.0.0 (langgraph)
+     Test plugin agent demonstrating the plugin system
+
+Found 3 template(s)
+
+🔧 Select Agent Template:
+Enter choice (1-3) [default: 1]: 1
+
+🛠️  Available Tools:
+  0. None (no tools)
+  1. read-lines
+  2. create-file
+  3. grep-file
+  4. delete-file
+  5. fetch-url
+  6. parse-url
+
+Select tools to enable (comma-separated numbers, or 0 for none) [default: 0]: 
+Tools: 1,5,6
+✅ Enabled tools: read-lines, fetch-url, parse-url
+
+🤖 Existing Agents:
+  No existing agents found
+
+🔧 Creating new Simple Test Cli Agent...
+✅ Agent created: Simple Test Cli Agent
+
+🎯 Agent Details:
+   ID: simple-test-cli-example
+   Name: Simple Test Cli Agent
+   Template: simple-test v1.0.0
+   Status: draft
+   Tools: read-lines, fetch-url, parse-url
+
+💬 Interactive Chat Session
+Commands:
+  'exit' - Exit the chat
+  'stream' - Toggle streaming mode
+  'clear' - Clear conversation history and reset task
+  'newtask' - Start a new task (resets task ID)
+============================================================
+
+You: Hello! Can you help me fetch a URL?
+Simple Test Cli Agent: 🤖 Of course! I can help you fetch URLs...
+```
 
 ### Task Management
 

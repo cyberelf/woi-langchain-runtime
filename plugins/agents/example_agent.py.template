@@ -1,0 +1,106 @@
+"""Example agent plugin template.
+
+Copy this file to create your own custom agent:
+1. Rename the file (e.g., my_agent.py)
+2. Update the class name and attributes
+3. Implement your agent logic in _build_graph()
+4. Save and restart the runtime - your agent will be discovered!
+"""
+
+from runtime.infrastructure.frameworks.langgraph.templates.base import BaseLangGraphChatAgent
+from langchain_core.messages import BaseMessage, AIMessage
+from langgraph.graph import StateGraph, MessagesState, END
+
+
+class ExampleCustomAgent(BaseLangGraphChatAgent):
+    """Example custom agent template.
+    
+    This agent demonstrates the minimum requirements for a plugin agent.
+    Replace this with your own implementation.
+    """
+    
+    # REQUIRED: Unique identifier for your agent
+    template_id = "example-custom-agent"
+    
+    # REQUIRED: Human-readable name
+    template_name = "Example Custom Agent"
+    
+    # REQUIRED: Semantic version
+    template_version = "1.0.0"
+    
+    # REQUIRED: Brief description
+    template_description = "Example agent demonstrating plugin system"
+    
+    # OPTIONAL: Plugin version
+    __version__ = "1.0.0"
+    
+    async def _build_graph(self):
+        """Build the agent's conversation graph.
+        
+        This method must be implemented. It should return a compiled LangGraph.
+        
+        Returns:
+            Compiled StateGraph
+        """
+        # Create state graph
+        graph = StateGraph(MessagesState)
+        
+        # Add processing node
+        graph.add_node("chat", self._chat_node)
+        
+        # Define flow
+        graph.set_entry_point("chat")
+        graph.add_edge("chat", END)
+        
+        # Compile and return
+        return graph
+    
+    async def _chat_node(self, state: MessagesState):
+        """Process chat messages.
+        
+        Args:
+            state: Current conversation state with messages
+            
+        Returns:
+            Dict with updated messages
+        """
+        messages = state["messages"]
+        
+        # Get tools if configured
+        tools = []
+        if self.toolset_client:
+            tools = await self.toolset_client.tools
+        
+        # Bind tools to LLM if available
+        if tools:
+            llm_with_tools = self.llm.bind_tools(tools)
+            response = await llm_with_tools.ainvoke(messages)
+        else:
+            response = await self.llm.ainvoke(messages)
+        
+        return {"messages": [response]}
+
+
+# You can define multiple agents in one file - all will be discovered!
+
+class AnotherExampleAgent(BaseLangGraphChatAgent):
+    """Another example showing multiple agents in one file."""
+    
+    template_id = "another-example-agent"
+    template_name = "Another Example Agent"
+    template_version = "1.0.0"
+    template_description = "Demonstrates that multiple agents can be in one file"
+    
+    async def _build_graph(self):
+        """Build graph for this agent."""
+        graph = StateGraph(MessagesState)
+        graph.add_node("process", self._process)
+        graph.set_entry_point("process")
+        graph.add_edge("process", END)
+        return graph
+    
+    async def _process(self, state: MessagesState):
+        """Simple processing node."""
+        messages = state["messages"]
+        response = await self.llm.ainvoke(messages)
+        return {"messages": [response]}

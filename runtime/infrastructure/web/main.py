@@ -21,6 +21,11 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Agent Runtime with async task management...")
     
     try:
+        # Initialize plugin system
+        from runtime.core.plugin import initialize_plugin_system
+        await initialize_plugin_system()
+        logger.info("Plugin system initialized")
+        
         # Initialize new task management architecture
         dependencies = await startup_dependencies()
         logger.info("Task management architecture initialized successfully")
@@ -29,7 +34,7 @@ async def lifespan(app: FastAPI):
         app.state.dependencies = dependencies
         
     except Exception as e:
-        logger.error(f"Failed to initialize task management: {e}")
+        logger.error(f"Failed to initialize application: {e}")
         raise
     
     yield
