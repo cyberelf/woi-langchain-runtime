@@ -317,3 +317,15 @@ class ChatCompletionRequest(BaseModel):
         if self.metadata:
             return self.metadata.get("user_id")
         return None
+
+
+class ComposeAgentRequest(BaseModel):
+    """Request model for composing an agent from natural language instructions."""
+    
+    template_id: str = Field(..., description="Target template ID to use for the agent")
+    instructions: str = Field(..., description="Natural language instructions describing the desired agent")
+    suggested_name: Optional[str] = Field(None, description="Optional suggested name for the agent")
+    suggested_tools: Optional[list[str]] = Field(None, description="Optional suggested tools to consider")
+    llm_config_id: Optional[str] = Field("deepseek", description="LLM configuration to use for composition")
+    
+    model_config = ConfigDict(extra="forbid")

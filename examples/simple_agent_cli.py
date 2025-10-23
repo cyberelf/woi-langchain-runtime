@@ -26,167 +26,276 @@ async def main():
         print(f"🚀 Agent CLI Example (using Client SDK, timeout={timeout}s)")
         print("=" * 60)
         
-        # List available templates
-        print("\n📋 Available Templates:")
-        templates = await client.list_templates()
-        if not templates:
-            print("  ❌ No templates found. Please ensure the runtime is running.")
-            return
+        # Ask user for mode: compose or manual
+        print("\n🎯 Agent Creation Mode:")
+        print("  1. Manual Configuration (traditional)")
+        print("  2. AI-Powered Compose (let AI configure the agent)")
+        mode_choice = input("Select mode (1-2) [default: 1]: ").strip() or "1"
+        
+        if mode_choice == "2":
+            # AI Compose Mode
+            print("\n✨ AI-Powered Agent Composition")
+            print("=" * 60)
             
-        template_map = {}
-        for idx, template in enumerate(templates, 1):
-            print(f"  {idx}. {template.id} v{template.version} ({template.framework})")
-            print(f"     {template.description}")
-            template_map[str(idx)] = template
-        
-        print(f"\nFound {len(templates)} template(s)")
-        
-        # Let user select template type
-        print("\n🔧 Select Agent Template:")
-        template_choice = input(f"Enter choice (1-{len(templates)}) [default: 1]: ").strip() or "1"
-        
-        if template_choice not in template_map:
-            print(f"❌ Invalid choice. Defaulting to template 1.")
-            template_choice = "1"
-        
-        selected_template = template_map[template_choice]
-        template_id = selected_template.id
-        
-        # Available tools for selection
-        available_tools = [
-            "read-lines",
-            "create-file", 
-            "grep-file",
-            "delete-file",
-            "fetch-url",
-            "parse-url"
-        ]
-        
-        print("\n🛠️  Available Tools:")
-        print("  0. None (no tools)")
-        for idx, tool in enumerate(available_tools, 1):
-            print(f"  {idx}. {tool}")
-        
-        print("\nSelect tools to enable (comma-separated numbers, or 0 for none) [default: 0]: ")
-        tool_input = input("Tools: ").strip() or "0"
-        
-        selected_toolsets = []
-        if tool_input != "0":
+            # List available templates
+            print("\n📋 Available Templates:")
+            templates = await client.list_templates()
+            if not templates:
+                print("  ❌ No templates found. Please ensure the runtime is running.")
+                return
+                
+            template_map = {}
+            for idx, template in enumerate(templates, 1):
+                print(f"  {idx}. {template.id} v{template.version} ({template.framework})")
+                print(f"     {template.description}")
+                template_map[str(idx)] = template
+            
+            print(f"\nFound {len(templates)} template(s)")
+            
+            # Let user select template
+            print("\n🔧 Select Agent Template:")
+            template_choice = input(f"Enter choice (1-{len(templates)}) [default: 1]: ").strip() or "1"
+            
+            if template_choice not in template_map:
+                print(f"❌ Invalid choice. Defaulting to template 1.")
+                template_choice = "1"
+            
+            selected_template = template_map[template_choice]
+            template_id = selected_template.id
+            
+            # Get AI composition instructions
+            print("\n💬 Describe the agent you want to create:")
+            print("   (e.g., 'Create an agent that analyzes log files and identifies errors')")
+            instructions = input("Instructions: ").strip()
+            
+            if not instructions:
+                print("❌ Instructions cannot be empty")
+                return
+            
+            # Optional: suggest name
+            suggested_name = input("\nSuggested agent name (optional): ").strip() or None
+            
+            # Compose agent configuration
+            print(f"\n🤖 Composing agent configuration with AI...")
             try:
-                tool_indices = [int(x.strip()) for x in tool_input.split(",")]
-                for idx in tool_indices:
-                    if 1 <= idx <= len(available_tools):
-                        selected_toolsets.append(available_tools[idx - 1])
-            except ValueError:
-                print("❌ Invalid tool selection. No tools will be enabled.")
+                composed = await client.compose_agent(
+                    template_id=template_id,
+                    instructions=instructions,
+                    suggested_name=suggested_name,
+                    llm_config_id="deepseek"
+                )
+                
+                # Display composed configuration
+                print(f"\n✨ AI-Generated Agent Configuration:")
+                print(f"   ID: {composed.agent_id}")
+                print(f"   Name: {composed.name}")
+                print(f"   Description: {composed.description}")
+                print(f"\n📝 System Prompt:")
+                print(f"   {composed.system_prompt[:200]}{'...' if len(composed.system_prompt) > 200 else ''}")
+                if composed.toolsets:
+                    print(f"\n🛠️  Tools: {', '.join(composed.toolsets)}")
+                if composed.reasoning:
+                    print(f"\n💭 AI Reasoning:")
+                    print(f"   {composed.reasoning[:300]}{'...' if len(composed.reasoning) > 300 else ''}")
+                
+                # Confirm creation
+                print("\n")
+                confirm = input("Create agent with this configuration? (Y/n): ").strip().lower()
+                if confirm and confirm != 'y':
+                    print("❌ Agent creation cancelled")
+                    return
+                
+                # Create the agent
+                agent_data = CreateAgentRequest(
+                    id=composed.agent_id,
+                    name=composed.name,
+                    description=composed.description,
+                    avatar_url=None,
+                    template_id=composed.template_id,
+                    template_version_id=composed.template_version_id,
+                    template_config=composed.template_config,
+                    system_prompt=composed.system_prompt,
+                    llm_config_id="deepseek",
+                    toolsets=composed.toolsets,
+                    conversation_config={},
+                    agent_line_id=None,
+                    version_type="beta",
+                    version_number="v1", 
+                    owner_id="cli-example",
+                    status="draft"
+                )
+                
+                agent_info = await client.create_agent(agent_data)
+                print(f"\n✅ Agent created: {agent_info.name}")
+                
+            except Exception as e:
+                print(f"\n❌ Composition failed: {e}")
+                print("Falling back to manual mode...")
+                mode_choice = "1"  # Fall back to manual mode
         
-        if selected_toolsets:
-            print(f"✅ Enabled tools: {', '.join(selected_toolsets)}")
-        else:
-            print("✅ No tools enabled")
-        
-        # Configure agent based on selected template
-        agent_id = f"{template_id}-cli-example"
-        agent_name = f"{selected_template.id.replace('-', ' ').title()} CLI Agent"
-        agent_description = f"CLI demonstration agent using {template_id} template"
-        
-        # Build template config based on template type
-        if template_id == "langgraph-workflow":
-            template_config = {
-                "workflow_responsibility": "Analyzing and responding to user questions with multi-step processing.",
-                "steps": [
-                    {
-                        "name": "Step 1: Analyze Request",
-                        "prompt": "Analyze the user's request and identify key requirements.",
-                        "tools": selected_toolsets,
-                        "timeout": 60,
-                        "retry_count": 1
-                    },
-                    {
-                        "name": "Step 2: Generate Response",
-                        "prompt": "Generate a comprehensive response based on the analysis.",
-                        "tools": [],
-                        "timeout": 60,
-                        "retry_count": 0
-                    }
-                ],
-                "max_retries": 2,
-                "step_timeout": 60,
-                "fail_on_error": False
-            }
-            system_prompt = "You are a helpful workflow assistant that processes requests step by step."
-        elif template_id == "simple-test":
-            template_config = {
-                "response_prefix": "🤖 ",
-                "system_prompt": "You are a helpful assistant that responds to user questions."
-            }
-            system_prompt = "You are a helpful assistant that responds to user questions."
-        elif template_id == "test-plugin-agent":
-            template_config = {
-                "greeting": "Hello from plugin agent!",
-                "max_iterations": 10
-            }
-            system_prompt = "You are a test plugin agent demonstrating the plugin system."
-        else:
-            # Generic config for unknown templates
-            template_config = {}
-            system_prompt = "You are a helpful assistant."
-        
-        # Check existing agents
-        print("\n🤖 Existing Agents:")
-        agents = await client.list_agents()
-        if agents:
-            for agent in agents:
-                print(f"  • {agent.agent_id} ({agent.name}) - {agent.template_id}")
-        else:
-            print("  No existing agents found")
-        
-        # Create or use existing agent
-        existing_agent = None
-        
-        for agent in agents:
-            if agent.agent_id == agent_id:
-                existing_agent = agent
-                break
-        
-        if existing_agent:
-            print(f"\n✅ Using existing agent: {existing_agent.name}")
+        if mode_choice == "1":
+            # Manual Configuration Mode (existing code)
+            # List available templates
+            print("\n📋 Available Templates:")
+            templates = await client.list_templates()
+            if not templates:
+                print("  ❌ No templates found. Please ensure the runtime is running.")
+                return
+                
+            template_map = {}
+            for idx, template in enumerate(templates, 1):
+                print(f"  {idx}. {template.id} v{template.version} ({template.framework})")
+                print(f"     {template.description}")
+                template_map[str(idx)] = template
             
-            # Ask if user wants to recreate with new config
-            recreate = input("Do you want to recreate with new configuration? (y/N): ").strip().lower()
-            if recreate == 'y':
-                print(f"🗑️  Deleting existing agent...")
-                await client.delete_agent(agent_id)
-                existing_agent = None
+            print(f"\nFound {len(templates)} template(s)")
+            
+            # Let user select template type
+            print("\n🔧 Select Agent Template:")
+            template_choice = input(f"Enter choice (1-{len(templates)}) [default: 1]: ").strip() or "1"
+            
+            if template_choice not in template_map:
+                print(f"❌ Invalid choice. Defaulting to template 1.")
+                template_choice = "1"
+            
+            selected_template = template_map[template_choice]
+            template_id = selected_template.id
+            
+            # Available tools for selection
+            available_tools = [
+                "read-lines",
+                "create-file", 
+                "grep-file",
+                "delete-file",
+                "fetch-url",
+                "parse-url"
+            ]
+            
+            print("\n🛠️  Available Tools:")
+            print("  0. None (no tools)")
+            for idx, tool in enumerate(available_tools, 1):
+                print(f"  {idx}. {tool}")
+            
+            print("\nSelect tools to enable (comma-separated numbers, or 0 for none) [default: 0]: ")
+            tool_input = input("Tools: ").strip() or "0"
+            
+            selected_toolsets = []
+            if tool_input != "0":
+                try:
+                    tool_indices = [int(x.strip()) for x in tool_input.split(",")]
+                    for idx in tool_indices:
+                        if 1 <= idx <= len(available_tools):
+                            selected_toolsets.append(available_tools[idx - 1])
+                except ValueError:
+                    print("❌ Invalid tool selection. No tools will be enabled.")
+            
+            if selected_toolsets:
+                print(f"✅ Enabled tools: {', '.join(selected_toolsets)}")
             else:
-                agent_info = existing_agent
-        
-        if not existing_agent:
-            print(f"\n🔧 Creating new {agent_name}...")
+                print("✅ No tools enabled")
             
-            # Create agent configuration
-            agent_data = CreateAgentRequest(
-                id=agent_id,
-                name=agent_name,
-                description=agent_description,
-                avatar_url=None,
-                template_id=template_id,
-                template_version_id="1.0.0",
-                template_config=template_config,
-                system_prompt=system_prompt,
-                llm_config_id="deepseek",
-                toolsets=selected_toolsets,
-                conversation_config={},
-                agent_line_id=None,  # Will be auto-populated from id by validator
-                version_type="beta",
-                version_number="v1", 
-                owner_id="cli-example",  # Optional but provided
-                status="draft"
-            )
+            # Configure agent based on selected template
+            agent_id = f"{template_id}-cli-example"
+            agent_name = f"{selected_template.id.replace('-', ' ').title()} CLI Agent"
+            agent_description = f"CLI demonstration agent using {template_id} template"
             
-            # Create agent using client SDK
-            agent_info = await client.create_agent(agent_data)
-            print(f"✅ Agent created: {agent_info.name}")
+            # Build template config based on template type
+            if template_id == "langgraph-workflow":
+                template_config = {
+                    "workflow_responsibility": "Analyzing and responding to user questions with multi-step processing.",
+                    "steps": [
+                        {
+                            "name": "Step 1: Analyze Request",
+                            "prompt": "Analyze the user's request and identify key requirements.",
+                            "tools": selected_toolsets,
+                            "timeout": 60,
+                            "retry_count": 1
+                        },
+                        {
+                            "name": "Step 2: Generate Response",
+                            "prompt": "Generate a comprehensive response based on the analysis.",
+                            "tools": [],
+                            "timeout": 60,
+                            "retry_count": 0
+                        }
+                    ],
+                    "max_retries": 2,
+                    "step_timeout": 60,
+                    "fail_on_error": False
+                }
+                system_prompt = "You are a helpful workflow assistant that processes requests step by step."
+            elif template_id == "simple-test":
+                template_config = {
+                    "response_prefix": "🤖 ",
+                    "system_prompt": "You are a helpful assistant that responds to user questions."
+                }
+                system_prompt = "You are a helpful assistant that responds to user questions."
+            elif template_id == "test-plugin-agent":
+                template_config = {
+                    "greeting": "Hello from plugin agent!",
+                    "max_iterations": 10
+                }
+                system_prompt = "You are a test plugin agent demonstrating the plugin system."
+            else:
+                # Generic config for unknown templates
+                template_config = {}
+                system_prompt = "You are a helpful assistant."
+            
+            # Check existing agents
+            print("\n🤖 Existing Agents:")
+            agents = await client.list_agents()
+            if agents:
+                for agent in agents:
+                    print(f"  • {agent.agent_id} ({agent.name}) - {agent.template_id}")
+            else:
+                print("  No existing agents found")
+            
+            # Create or use existing agent
+            existing_agent = None
+            
+            for agent in agents:
+                if agent.agent_id == agent_id:
+                    existing_agent = agent
+                    break
+            
+            if existing_agent:
+                print(f"\n✅ Using existing agent: {existing_agent.name}")
+                
+                # Ask if user wants to recreate with new config
+                recreate = input("Do you want to recreate with new configuration? (y/N): ").strip().lower()
+                if recreate == 'y':
+                    print(f"🗑️  Deleting existing agent...")
+                    await client.delete_agent(agent_id)
+                    existing_agent = None
+                else:
+                    agent_info = existing_agent
+            
+            if not existing_agent:
+                print(f"\n🔧 Creating new {agent_name}...")
+                
+                # Create agent configuration
+                agent_data = CreateAgentRequest(
+                    id=agent_id,
+                    name=agent_name,
+                    description=agent_description,
+                    avatar_url=None,
+                    template_id=template_id,
+                    template_version_id="1.0.0",
+                    template_config=template_config,
+                    system_prompt=system_prompt,
+                    llm_config_id="deepseek",
+                    toolsets=selected_toolsets,
+                    conversation_config={},
+                    agent_line_id=None,  # Will be auto-populated from id by validator
+                    version_type="beta",
+                    version_number="v1", 
+                    owner_id="cli-example",  # Optional but provided
+                    status="draft"
+                )
+                
+                # Create agent using client SDK
+                agent_info = await client.create_agent(agent_data)
+                print(f"✅ Agent created: {agent_info.name}")
         
         print("\n🎯 Agent Details:")
         print(f"   ID: {agent_info.agent_id}")

@@ -166,7 +166,7 @@ class InMemoryMessageQueue(MessageQueueInterface):
                         msg.retry_count += 1
                         msg.status = MessageStatus.RETRY
                         msg.updated_at = datetime.now(timezone.utc)
-                        if reason:
+                        if reason and msg.metadata is not None:
                             msg.metadata['reject_reason'] = reason
                         
                         # Requeue with lower priority for retry
@@ -175,7 +175,7 @@ class InMemoryMessageQueue(MessageQueueInterface):
                     else:
                         msg.status = MessageStatus.FAILED
                         msg.updated_at = datetime.now(timezone.utc)
-                        if reason:
+                        if reason and msg.metadata is not None:
                             msg.metadata['reject_reason'] = reason
                         logger.warning(f"Failed message {message.id}: {reason}")
                     

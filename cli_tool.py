@@ -137,7 +137,10 @@ async def list_templates(ctx, framework: Optional[str]):
 async def show_template(ctx, template_id: str, version: Optional[str]):
     """Show detailed information about a template"""
     try:
-        async with RuntimeClientContext() as runtime_client:
+        async with RuntimeClientContext(
+            base_url=ctx.obj['base_url'], 
+            api_key=ctx.obj['api_key']
+        ) as runtime_client:
             template = await runtime_client.get_template(template_id, version)
             
             if not template:
@@ -160,6 +163,8 @@ async def show_template(ctx, template_id: str, version: Optional[str]):
                 click.echo(f"  Version: {template.version}")
                 click.echo(f"  Framework: {template.framework}")
                 click.echo(f"  Description: {template.description}")
+                click.echo(f"  Configuration Schema:")
+                click.echo(f"{json.dumps(template.config, indent=2)}")
                         
     except Exception as e:
         click.echo(f"Error showing template: {e}", err=True)
@@ -177,7 +182,10 @@ def agents():
 async def list_agents(ctx):
     """List all existing agents"""
     try:
-        async with RuntimeClientContext() as runtime_client:
+        async with RuntimeClientContext(
+            base_url=ctx.obj['base_url'], 
+            api_key=ctx.obj['api_key']
+        ) as runtime_client:
             agent_list = await runtime_client.list_agents()
             
             if ctx.obj['json_output']:
@@ -219,7 +227,10 @@ async def list_agents(ctx):
 async def show_agent(ctx, agent_id: str):
     """Show detailed information about an agent"""
     try:
-        async with RuntimeClientContext() as runtime_client:
+        async with RuntimeClientContext(
+            base_url=ctx.obj['base_url'], 
+            api_key=ctx.obj['api_key']
+        ) as runtime_client:
             agent = await runtime_client.get_agent(agent_id)
             
             if not agent:
@@ -266,7 +277,10 @@ async def create_agent(ctx, template_id: str, agent_id: Optional[str], name: Opt
                       system_prompt: Optional[str]):
     """Create a new agent from a template"""
     try:
-        async with RuntimeClientContext() as runtime_client:
+        async with RuntimeClientContext(
+            base_url=ctx.obj['base_url'], 
+            api_key=ctx.obj['api_key']
+        ) as runtime_client:
             # Auto-generate missing fields
             if not agent_id:
                 agent_id = f"{template_id}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
@@ -289,9 +303,8 @@ async def create_agent(ctx, template_id: str, agent_id: Optional[str], name: Opt
                 name=name,
                 description=description,
                 avatar_url=None,
-                type=template_id,
                 template_id=template_id,
-                template_version_id=version,  # Updated: removed template_version
+                template_version_id=version,
                 template_config={},
                 system_prompt=system_prompt,
                 conversation_config={},
@@ -331,6 +344,109 @@ async def create_agent(ctx, template_id: str, agent_id: Optional[str], name: Opt
         sys.exit(1)
 
 
+@agents.command('compose')
+@click.argument('template_id')
+@click.option('--instructions', '-i', prompt='Agent instructions', help='Natural language instructions for the agent')
+@click.option('--name', help='Suggested agent name')
+@click.option('--tools', help='Comma-separated list of suggested tools')
+@click.option('--llm-config', default='deepseek', help='LLM configuration ID')
+@click.option('--yes', is_flag=True, help='Skip confirmation and create immediately')
+@click.pass_context
+async def compose_agent(ctx, template_id: str, instructions: str, name: Optional[str],
+                       tools: Optional[str], llm_config: str, yes: bool):
+    """Compose an agent configuration using AI from natural language instructions"""
+    try:
+        async with RuntimeClientContext(
+            base_url=ctx.obj['base_url'], 
+            api_key=ctx.obj['api_key']
+        ) as runtime_client:
+            # Parse tools if provided
+            suggested_tools = None
+            if tools:
+                suggested_tools = [t.strip() for t in tools.split(',')]
+            
+            # Call compose endpoint
+            click.echo(f"\n🤖 Composing agent configuration...")
+            click.echo(f"   Template: {template_id}")
+            click.echo(f"   Instructions: {instructions[:100]}{'...' if len(instructions) > 100 else ''}")
+            
+            composed = await runtime_client.compose_agent(
+                template_id=template_id,
+                instructions=instructions,
+                suggested_name=name,
+                suggested_tools=suggested_tools,
+                llm_config_id=llm_config
+            )
+            
+            # Display composed configuration
+            if ctx.obj['json_output']:
+                click.echo(json.dumps({
+                    'agent_id': composed.agent_id,
+                    'name': composed.name,
+                    'description': composed.description,
+                    'template_id': composed.template_id,
+                    'system_prompt': composed.system_prompt,
+                    'template_config': composed.template_config,
+                    'toolsets': composed.toolsets,
+                    'reasoning': composed.reasoning
+                }, indent=2))
+            else:
+                click.echo(f"\n✨ Composed Agent Configuration:")
+                click.echo(f"   ID: {composed.agent_id}")
+                click.echo(f"   Name: {composed.name}")
+                click.echo(f"   Description: {composed.description}")
+                click.echo(f"   Template: {composed.template_id} v{composed.template_version_id}")
+                click.echo(f"\n📝 System Prompt:")
+                click.echo(f"   {composed.system_prompt[:200]}{'...' if len(composed.system_prompt) > 200 else ''}")
+                click.echo(f"\n⚙️  Template Configuration:")
+                click.echo(f"   {json.dumps(composed.template_config, indent=2)[:300]}{'...' if len(json.dumps(composed.template_config)) > 300 else ''}")
+                if composed.toolsets:
+                    click.echo(f"\n🛠️  Tools: {', '.join(composed.toolsets)}")
+                if composed.reasoning:
+                    click.echo(f"\n💭 Reasoning:")
+                    click.echo(f"   {composed.reasoning}")
+                
+                # Confirm before creating
+                if not yes:
+                    click.echo(f"\n")
+                    if not click.confirm("Create agent with this configuration?"):
+                        click.echo("Agent creation cancelled")
+                        return
+                
+                # Create the agent
+                click.echo(f"\n🔧 Creating agent...")
+                agent_request = CreateAgentRequest(
+                    id=composed.agent_id,
+                    name=composed.name,
+                    description=composed.description,
+                    avatar_url=None,
+                    template_id=composed.template_id,
+                    template_version_id=composed.template_version_id,
+                    template_config=composed.template_config,
+                    system_prompt=composed.system_prompt,
+                    conversation_config={},
+                    toolsets=composed.toolsets,
+                    llm_config_id=llm_config,
+                    agent_line_id=None,
+                    version_type="beta",
+                    version_number="v1",
+                    owner_id="cli-compose",
+                    status="draft"
+                )
+                
+                agent = await runtime_client.create_agent(agent_request)
+                
+                click.echo(f"✅ Agent created successfully!")
+                click.echo(f"  ID: {agent.agent_id}")
+                click.echo(f"  Name: {agent.name}")
+                click.echo(f"\nYou can now chat with this agent using:")
+                click.echo(f"  python cli_tool.py chat {agent.agent_id}")
+                        
+    except Exception as e:
+        click.echo(f"Error composing agent: {e}", err=True)
+        sys.exit(1)
+
+
 @agents.command('delete')
 @click.argument('agent_id')
 @click.option('--yes', is_flag=True, help='Skip confirmation prompt')
@@ -338,7 +454,10 @@ async def create_agent(ctx, template_id: str, agent_id: Optional[str], name: Opt
 async def delete_agent(ctx, agent_id: str, yes: bool):
     """Delete an existing agent"""
     try:
-        async with RuntimeClientContext() as runtime_client:
+        async with RuntimeClientContext(
+            base_url=ctx.obj['base_url'], 
+            api_key=ctx.obj['api_key']
+        ) as runtime_client:
             # Check if agent exists
             agent = await runtime_client.get_agent(agent_id)
             if not agent:
@@ -378,7 +497,10 @@ async def delete_agent(ctx, agent_id: str, yes: bool):
 async def chat(ctx, agent_id: str, stream: bool):
     """Start an interactive chat session with an agent"""
     try:
-        async with RuntimeClientContext() as runtime_client:
+        async with RuntimeClientContext(
+            base_url=ctx.obj['base_url'], 
+            api_key=ctx.obj['api_key']
+        ) as runtime_client:
             # Check if agent exists
             agent = await runtime_client.get_agent(agent_id)
             if not agent:
@@ -471,7 +593,10 @@ async def chat(ctx, agent_id: str, stream: bool):
 async def health(ctx):
     """Show runtime health status"""
     try:
-        async with RuntimeClientContext() as runtime_client:
+        async with RuntimeClientContext(
+            base_url=ctx.obj['base_url'], 
+            api_key=ctx.obj['api_key']
+        ) as runtime_client:
             health_status = await runtime_client.get_health_status()
             
             if ctx.obj['json_output']:
@@ -508,6 +633,7 @@ def main():
     list_agents.callback = async_cmd(list_agents.callback)
     show_agent.callback = async_cmd(show_agent.callback)
     create_agent.callback = async_cmd(create_agent.callback)
+    compose_agent.callback = async_cmd(compose_agent.callback)
     delete_agent.callback = async_cmd(delete_agent.callback)
     chat.callback = async_cmd(chat.callback)
     health.callback = async_cmd(health.callback)

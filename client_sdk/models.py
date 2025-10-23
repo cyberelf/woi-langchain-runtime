@@ -67,13 +67,19 @@ AgentCreateRequest = CreateAgentRequest
 # API Response Models
 @dataclass
 class TemplateInfo:
-    """Information about an available template."""
+    """Information about an available template.
+    
+    Note: config is a list of configuration field definitions that may include
+    nested structures (arrays with items, objects with properties).
+    Each field is a dictionary with keys: key, type, description, default, validation,
+    and optionally 'items' (for arrays) or 'properties' (for objects).
+    """
     id: str
     name: str
     version: str
     framework: str
     description: str
-    config: list[dict]
+    config: list[dict]  # Config fields with potential nested structures
 
 
 class AgentInfo(BaseModel):
@@ -165,6 +171,32 @@ class RuntimeStatus(Enum):
     ERROR = "error"
 
 
+class ComposeAgentRequest(BaseModel):
+    """Request model for composing an agent from natural language instructions."""
+    
+    template_id: str = Field(..., description="Target template ID to use for the agent")
+    instructions: str = Field(..., description="Natural language instructions describing the desired agent")
+    suggested_name: Optional[str] = Field(None, description="Optional suggested name for the agent")
+    suggested_tools: Optional[list[str]] = Field(None, description="Optional suggested tools to consider")
+    llm_config_id: str = Field("deepseek", description="LLM configuration to use for composition")
+
+
+class ComposeAgentResponse(BaseModel):
+    """Response model for agent composition."""
+    
+    agent_id: str = Field(..., description="Suggested agent ID")
+    name: str = Field(..., description="Suggested agent name")
+    description: str = Field(..., description="Suggested agent description")
+    template_id: str = Field(..., description="Template ID used")
+    template_version_id: str = Field("1.0.0", description="Template version")
+    system_prompt: str = Field(..., description="Generated system prompt")
+    template_config: dict = Field(..., description="Generated template configuration")
+    toolsets: list[str] = Field(default_factory=list, description="Recommended toolsets")
+    llm_config_id: str = Field(..., description="LLM configuration ID")
+    reasoning: Optional[str] = Field(None, description="Explanation of composition decisions")
+
+
+
 __all__ = [
     "CreateAgentRequest",
     "AgentCreateRequest",  # Backward compatibility alias
@@ -184,4 +216,7 @@ __all__ = [
     # Backward compatibility aliases
     "ChatCompletionChunk",
     "ChatCompletionChunkChoice",
+    # Compose models
+    "ComposeAgentRequest",
+    "ComposeAgentResponse",
 ]

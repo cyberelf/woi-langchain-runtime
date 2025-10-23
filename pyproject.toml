@@ -45,6 +45,8 @@ dev = [
     "fastapi>=0.104.0",
     "fastapi-cli>=0.0.4"
 ]
+rabbitmq = ["aio-pika>=8.3.0"]
+redis    = ["redis>=4.6.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["runtime"]
@@ -91,4 +93,9 @@ reportInvalidTypeVarUse = true
 reportSelfClsParameterName = true
 # Ignore venv
 exclude = ["**/.venv", "**/venv", "**/env", "**/envs"]
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.406",
+]
 

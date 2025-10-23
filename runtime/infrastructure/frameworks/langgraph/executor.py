@@ -8,6 +8,8 @@ from typing import Any, Optional
 
 from pydantic import ValidationError
 
+from runtime.core.interfaces import ToolsetServiceInterface
+
 from .config import LangGraphFrameworkConfig
 from runtime.service_config import get_services_config
 from .templates.base import BaseLangGraphAgent
@@ -195,7 +197,7 @@ class LangGraphAgentExecutor(AgentExecutorInterface):
         
         return template_class.validate_configuration(configuration)
     
-    def get_supported_templates(self) -> list[dict]:
+    def get_supported_templates(self) -> list[TemplateInfo]:
         """Get list of supported templates."""
         templates = []
         
@@ -203,17 +205,17 @@ class LangGraphAgentExecutor(AgentExecutorInterface):
             # Get the config fields as domain objects
             config_fields = template_class.get_config_fields()
             
-            # Create TemplateInfo using domain model
-            template_info = TemplateInfo.create_langgraph_template(
+            # Create TemplateInfo using domain model with ConfigField objects
+            template_info = TemplateInfo(
                 id=template_id,
                 name=template_class.template_name,
                 description=template_class.template_description,
                 version=template_class.template_version,
+                framework="langgraph",
                 config_fields=config_fields
             )
             
-            # Convert to dictionary for backward compatibility with existing API contracts
-            templates.append(template_info.to_dict())
+            templates.append(template_info)
         
         return templates
     
@@ -353,7 +355,7 @@ class LangGraphFrameworkExecutor(FrameworkExecutor):
             )
         return self._agent_executor
     
-    def get_templates(self) -> list[dict]:
+    def get_templates(self) -> list[TemplateInfo]:
         """Get available templates from this framework."""
         return self.agent_executor.get_supported_templates()
     
@@ -372,7 +374,7 @@ class LangGraphFrameworkExecutor(FrameworkExecutor):
                 self._llm_service = None
         return self._llm_service
     
-    def get_toolset_service(self) -> Any:
+    def get_toolset_service(self) -> Optional[ToolsetServiceInterface]:
         """Get framework-specific toolset service with validated configuration."""
         if self._toolset_service is None:
             try:

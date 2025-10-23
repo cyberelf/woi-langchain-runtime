@@ -8,21 +8,24 @@ from ....application.commands.create_agent_command import CreateAgentCommand
 from ....application.commands.update_agent_command import UpdateAgentCommand
 from ....application.commands.delete_agent_command import DeleteAgentCommand
 from ....application.commands.update_agent_status_command import UpdateAgentStatusCommand
+from ....application.services.execute_agent_service import ExecuteAgentService
 from ....application.services.create_agent_service import CreateAgentService
 from ....application.services.query_agent_service import QueryAgentService
 from ....application.services.update_agent_service import UpdateAgentService
 from ....application.services.delete_agent_service import DeleteAgentService
 from ....application.services.update_agent_status_service import UpdateAgentStatusService
+from ....application.services.compose_agent_service import ComposeAgentService
 from ....application.queries.get_agent_query import GetAgentQuery, ListAgentsQuery
 from ....domain.value_objects.agent_id import AgentId
-from ..models.requests import CreateAgentRequest, UpdateAgentRequest, UpdateAgentStatusRequest
-from ..models.responses import AgentResponse, CreateAgentResponse
+from ..models.requests import CreateAgentRequest, UpdateAgentRequest, UpdateAgentStatusRequest, ComposeAgentRequest
+from ..models.responses import AgentResponse, CreateAgentResponse, ComposeAgentResponse
 from ..dependencies import (
     get_create_agent_service, 
     get_query_agent_service,
     get_update_agent_service,
     get_delete_agent_service,
-    get_update_agent_status_service
+    get_update_agent_status_service,
+    get_compose_agent_service
 )
 from ..auth import runtime_auth
 
@@ -74,6 +77,56 @@ async def create_agent(
         )
     except Exception as e:
         logger.error(f"Failed to create agent: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+
+@router.post("/compose", response_model=ComposeAgentResponse, status_code=status.HTTP_200_OK)
+async def compose_agent(
+    request: ComposeAgentRequest,
+    service: ComposeAgentService = Depends(get_compose_agent_service),
+    _: bool = Depends(runtime_auth)
+) -> ComposeAgentResponse:
+    """Compose an agent configuration from natural language instructions.
+    
+    This endpoint uses LLM to generate agent configuration parameters based on
+    user instructions. The client is responsible for reviewing and confirming
+    the generated configuration before creating the actual agent.
+    """
+    try:
+        # Call composition service
+        composed_config = await service.compose(
+            template_id=request.template_id,
+            instructions=request.instructions,
+            suggested_name=request.suggested_name,
+            suggested_tools=request.suggested_tools,
+            llm_config_id=request.llm_config_id or "deepseek"
+        )
+        
+        # Build response
+        return ComposeAgentResponse(
+            agent_id=composed_config["agent_id"],
+            name=composed_config["name"],
+            description=composed_config["description"],
+            template_id=composed_config["template_id"],
+            template_version_id=composed_config.get("template_version_id", "1.0.0"),
+            system_prompt=composed_config["system_prompt"],
+            template_config=composed_config["template_config"],
+            toolsets=composed_config.get("toolsets", []),
+            llm_config_id=request.llm_config_id or "deepseek",
+            reasoning=composed_config.get("reasoning")
+        )
+        
+    except ValueError as e:
+        logger.warning(f"Agent composition failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Failed to compose agent: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"

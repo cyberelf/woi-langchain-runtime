@@ -26,9 +26,10 @@ async def list_templates(
         
         # Filter by framework if specified
         if framework:
-            templates = [t for t in templates if t.get("framework") == framework]
-   
-        return {"templates": templates}
+            templates = [t for t in templates if t.framework == framework]
+        
+        # Serialize TemplateInfo objects to dicts for JSON response
+        return {"templates": [t.to_dict() for t in templates]}
     except Exception as e:
         # Log the error and return a meaningful error response
         logger.error(f"Error getting templates from executor: {e}")
@@ -51,8 +52,9 @@ async def get_template(
     
     # Find the template by ID
     for template in templates:
-        if template.get("template_id") == template_id:
-            return template
+        if template.id == template_id:
+            # Serialize TemplateInfo object to dict for JSON response
+            return template.to_dict()
     
     from fastapi import HTTPException
     raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")

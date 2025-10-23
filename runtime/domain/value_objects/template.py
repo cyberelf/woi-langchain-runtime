@@ -1,5 +1,7 @@
 """Template value objects - Pure domain models."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -89,6 +91,12 @@ class ConfigField:
     default_value: Optional[Any] = None
     validation: Optional[ConfigFieldValidation] = None
 
+    # Support nested types:
+    # - For arrays, `items` describes the schema of array elements (single ConfigField)
+    # - For objects, `properties` provides a mapping of property name -> ConfigField
+    items: Optional["ConfigField"] = None
+    properties: Optional[dict[str, "ConfigField"]] = None
+
     def __post_init__(self):
         """Validate the configuration field."""
         if not self.key:
@@ -101,6 +109,17 @@ class ConfigField:
             raise ValueError("Config field type must be a string")
         if self.validation is not None and not isinstance(self.validation, ConfigFieldValidation):
             raise ValueError("Validation must be a ConfigFieldValidation instance")
+        # Validate nested fields
+        if self.field_type == "array":
+            if self.items is not None and not isinstance(self.items, ConfigField):
+                raise ValueError("items must be a ConfigField instance for array types")
+        if self.field_type == "object":
+            if self.properties is not None and not isinstance(self.properties, dict):
+                raise ValueError("properties must be a dict of ConfigField instances for object types")
+            if self.properties is not None:
+                for k, v in self.properties.items():
+                    if not isinstance(v, ConfigField):
+                        raise ValueError("Each property value must be a ConfigField instance")
 
     def has_default(self) -> bool:
         """Check if this field has a default value."""
@@ -123,6 +142,17 @@ class ConfigField:
         if self.validation is not None and self.validation.has_constraints():
             result["validation"] = self.validation.to_dict()
 
+        # Nested schema representation
+        if self.field_type == "array" and self.items is not None:
+            # Represent items schema inline
+            result["items"] = self.items.to_dict()
+
+        if self.field_type == "object" and self.properties is not None:
+            result_props: dict[str, Any] = {}
+            for prop_name, prop_field in self.properties.items():
+                result_props[prop_name] = prop_field.to_dict()
+            result["properties"] = result_props
+
         return result
 
     @classmethod
@@ -131,6 +161,14 @@ class ConfigField:
         validation = None
         if "validation" in data:
             validation = ConfigFieldValidation.from_dict(data["validation"])
+        # Handle nested types
+        items = None
+        properties = None
+        if data.get("type") == "array" and "items" in data and isinstance(data["items"], dict):
+            items = cls.from_dict(data["items"])
+
+        if data.get("type") == "object" and "properties" in data and isinstance(data["properties"], dict):
+            properties = {k: cls.from_dict(v) for k, v in data["properties"].items()}
 
         return cls(
             key=data["key"],
@@ -138,6 +176,8 @@ class ConfigField:
             description=data.get("description"),
             default_value=data.get("default"),
             validation=validation,
+            items=items,
+            properties=properties,
         )
 
     @classmethod
@@ -202,6 +242,26 @@ class ConfigField:
             description=description,
             default_value=default,
             validation=validation,
+        )
+
+    @classmethod
+    def create_object_field(cls, key: str, properties: dict[str, "ConfigField"], description: Optional[str] = None) -> "ConfigField":
+        """Create an object configuration field with nested properties."""
+        return cls(
+            key=key,
+            field_type="object",
+            description=description,
+            properties=properties,
+        )
+
+    @classmethod
+    def create_array_field(cls, key: str, items: "ConfigField", description: Optional[str] = None) -> "ConfigField":
+        """Create an array configuration field where each item follows `items` schema."""
+        return cls(
+            key=key,
+            field_type="array",
+            description=description,
+            items=items,
         )
 
 

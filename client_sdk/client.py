@@ -18,6 +18,8 @@ from .models import (
     RuntimeStatus,
     StreamingChunk,
     TemplateInfo,
+    ComposeAgentRequest,
+    ComposeAgentResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -186,6 +188,46 @@ class RuntimeClient:
             if e.response.status_code == 404:
                 return False
             raise
+
+    async def compose_agent(
+        self,
+        template_id: str,
+        instructions: str,
+        suggested_name: Optional[str] = None,
+        suggested_tools: Optional[list[str]] = None,
+        llm_config_id: str = "deepseek"
+    ) -> ComposeAgentResponse:
+        """Compose an agent configuration from natural language instructions.
+        
+        This method calls the LLM-powered composition endpoint to generate
+        agent configuration parameters. The returned configuration should be
+        reviewed and confirmed before creating the actual agent.
+        
+        Args:
+            template_id: Target template ID to use for the agent
+            instructions: Natural language description of desired agent
+            suggested_name: Optional suggested name for the agent
+            suggested_tools: Optional list of suggested tools to consider
+            llm_config_id: LLM configuration to use for composition
+            
+        Returns:
+            ComposeAgentResponse with generated configuration
+        """
+        request = ComposeAgentRequest(
+            template_id=template_id,
+            instructions=instructions,
+            suggested_name=suggested_name,
+            suggested_tools=suggested_tools,
+            llm_config_id=llm_config_id
+        )
+        
+        response = await self._request(
+            "POST", 
+            "agents/compose",
+            json=request.model_dump()
+        )
+        return ComposeAgentResponse(**response.json())
+
 
     # Interactive Chat Methods
 

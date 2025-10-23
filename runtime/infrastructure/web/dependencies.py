@@ -18,7 +18,9 @@ from ...application.services.query_agent_service import QueryAgentService
 from ...application.services.update_agent_service import UpdateAgentService
 from ...application.services.delete_agent_service import DeleteAgentService
 from ...application.services.update_agent_status_service import UpdateAgentStatusService
+from ...application.services.compose_agent_service import ComposeAgentService
 from ..unit_of_work.in_memory_uow import TransactionalInMemoryUnitOfWork
+from ..frameworks.langgraph.llm.service import LangGraphLLMService
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +161,25 @@ def get_update_agent_status_service() -> UpdateAgentStatusService:
     """Get update agent status service dependency."""
     uow = get_unit_of_work()
     return UpdateAgentStatusService(uow)
+
+
+def get_compose_agent_service() -> ComposeAgentService:
+    """Get compose agent service dependency."""
+    # Get framework executor which has LLM configuration
+    framework_executor = get_framework_executor()
+    
+    # Create LLM service with framework's LLM config
+    # The executor has the config already loaded
+    from ..frameworks.langgraph.executor import LangGraphFrameworkExecutor
+    if isinstance(framework_executor, LangGraphFrameworkExecutor):
+        llm_service = framework_executor._llm_service
+        if llm_service is None:
+            llm_service = LangGraphLLMService()
+    else:
+        # Fallback: create default LLM service
+        llm_service = LangGraphLLMService()
+    
+    return ComposeAgentService(llm_service, framework_executor)  # type: ignore
 
 
 async def startup_dependencies():

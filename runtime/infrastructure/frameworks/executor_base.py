@@ -1,8 +1,11 @@
 """Infrastructure Framework Executor Implementation."""
 
 from abc import ABC, abstractmethod
+from re import T
 from typing import Any, Dict, List, Optional
 from pydantic import ValidationError
+
+from runtime.core.interfaces import ToolsetServiceInterface
 
 # Import from core interfaces
 from ...core.executors import FrameworkExecutorInterface
@@ -32,7 +35,7 @@ class FrameworkExecutor(BaseService, FrameworkExecutorInterface, TemplateValidat
         pass
 
     @abstractmethod
-    def get_toolset_service(self) -> Any:
+    def get_toolset_service(self) -> Optional[ToolsetServiceInterface]:
         """Get framework-specific toolset service.
         
         Returns:

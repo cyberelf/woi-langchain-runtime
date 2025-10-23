@@ -4,19 +4,19 @@ This module provides toolset services specifically designed for LangGraph agents
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any, Optional, override
 
 from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from sqlalchemy import over
 
-# Removed domain abstraction - using concrete implementation
-
+from runtime.core.interfaces import ToolsetServiceInterface
 from ..config import ToolsetsConfig, MCPToolsetConfig
 
 logger = logging.getLogger(__name__)
 
 
-class LangGraphToolsetService:
+class LangGraphToolsetService(ToolsetServiceInterface):
     """Toolset service for LangGraph framework."""
     
     def __init__(self, toolsets_config: Optional[ToolsetsConfig]=None):
@@ -43,7 +43,19 @@ class LangGraphToolsetService:
     def create_client(self, toolset_names: list[str]) -> "LangGraphToolsetClient":
         """Create a toolset client for LangGraph."""
         return LangGraphToolsetClient(self._toolsets_config, toolset_names)
+    
+    @override
+    def get_all_toolset_names(self) -> list[str]:
+        """Get all available toolset names."""
+        names = list(self._toolsets_config.mcp.keys())
+        
+        # Add "custom" if custom tools are configured
+        if self._toolsets_config.custom:
+            names.append("custom")
+        
+        return names
 
+    @override
     async def shutdown(self) -> None:
         """Shutdown the toolset service."""
         pass
@@ -64,7 +76,6 @@ class LangGraphToolsetClient:
             self._tools = await self._get_tools()
         
         return self._tools
-
 
     async def _get_tools(self) -> list[BaseTool]:
         """Get LangGraph-compatible tools."""

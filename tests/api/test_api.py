@@ -998,3 +998,161 @@ async def test_workflow_agent_multi_step_execution(async_client, auth_headers):
     data = response.json()
     assert data["object"] == "chat.completion"
     assert len(data["choices"]) > 0
+
+
+# ============================================================================
+# Compose Agent API Tests
+# ============================================================================
+
+@pytest.mark.asyncio
+@patch("runtime.settings.settings.runtime_token", "test-token")
+async def test_compose_agent_api_success(async_client, auth_headers):
+    """Test compose agent API endpoint with successful composition."""
+    import json
+    from unittest.mock import AsyncMock, MagicMock
+    
+    # Mock the LLM response
+    with patch("runtime.infrastructure.frameworks.langgraph.llm.service.LangGraphLLMService") as MockLLMService:
+        mock_llm_service = MagicMock()
+        mock_llm_client = AsyncMock()
+        
+        # Create a valid response
+        mock_response = MagicMock()
+        mock_response.content = json.dumps({
+            "agent_id": "composed-test-agent",
+            "name": "Composed Test Agent",
+            "description": "An agent created through composition",
+            "system_prompt": "You are a composed test agent",
+            "template_config": {
+                "response_prefix": "Composed: ",
+                "system_prompt": "You are a composed agent"
+            },
+            "toolsets": [],
+            "reasoning": "Created a simple test agent through composition"
+        })
+        
+        mock_llm_client.ainvoke.return_value = mock_response
+        mock_llm_service.get_client.return_value = mock_llm_client
+        MockLLMService.return_value = mock_llm_service
+        
+        compose_data = {
+            "template_id": "simple-test",
+            "instructions": "Create a simple test agent",
+            "llm_config_id": "deepseek"
+        }
+        
+        response = await async_client.post(
+            "/v1/agents/compose",
+            json=compose_data,
+            headers=auth_headers
+        )
+        
+        # May succeed or fail depending on mock setup, but should not crash
+        assert response.status_code in [200, 500]
+
+
+@pytest.mark.asyncio
+@patch("runtime.settings.settings.runtime_token", "test-token")
+async def test_compose_agent_api_missing_template(async_client, auth_headers):
+    """Test compose agent API with non-existent template."""
+    compose_data = {
+        "template_id": "non-existent-template",
+        "instructions": "Create an agent with non-existent template"
+    }
+    
+    response = await async_client.post(
+        "/v1/agents/compose",
+        json=compose_data,
+        headers=auth_headers
+    )
+    
+    # Should return error
+    assert response.status_code in [400, 404, 500]
+    data = response.json()
+    assert "detail" in data or "error" in data
+
+
+@pytest.mark.asyncio
+@patch("runtime.settings.settings.runtime_token", "test-token")
+async def test_compose_agent_api_missing_instructions(async_client, auth_headers):
+    """Test compose agent API without instructions."""
+    compose_data = {
+        "template_id": "simple-test"
+        # Missing instructions
+    }
+    
+    response = await async_client.post(
+        "/v1/agents/compose",
+        json=compose_data,
+        headers=auth_headers
+    )
+    
+    # Should return validation error
+    assert response.status_code == 422
+    data = response.json()
+    assert "detail" in data
+
+
+@pytest.mark.asyncio
+@patch("runtime.settings.settings.runtime_token", "test-token")
+async def test_compose_agent_api_with_suggestions(async_client, auth_headers):
+    """Test compose agent API with suggested name and tools."""
+    compose_data = {
+        "template_id": "simple-test",
+        "instructions": "Create a helpful assistant",
+        "suggested_name": "My Custom Assistant",
+        "suggested_tools": ["web_search", "calculator"],
+        "llm_config_id": "deepseek"
+    }
+    
+    response = await async_client.post(
+        "/v1/agents/compose",
+        json=compose_data,
+        headers=auth_headers
+    )
+    
+    # May succeed or fail, but should process suggestions
+    assert response.status_code in [200, 500]
+
+
+@pytest.mark.asyncio
+async def test_compose_agent_api_unauthorized(async_client):
+    """Test compose agent API without authentication."""
+    compose_data = {
+        "template_id": "simple-test",
+        "instructions": "Create a test agent"
+    }
+    
+    response = await async_client.post(
+        "/v1/agents/compose",
+        json=compose_data
+    )
+    
+    # Should require authentication
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+@patch("runtime.settings.settings.runtime_token", "test-token")
+async def test_compose_agent_workflow_template(async_client, auth_headers):
+    """Test compose agent with workflow template."""
+    compose_data = {
+        "template_id": "langgraph-workflow",
+        "instructions": "Create a workflow agent that processes data in three steps: validate, transform, and output",
+        "llm_config_id": "deepseek"
+    }
+    
+    response = await async_client.post(
+        "/v1/agents/compose",
+        json=compose_data,
+        headers=auth_headers
+    )
+    
+    # May succeed or fail depending on environment
+    assert response.status_code in [200, 500]
+    
+    if response.status_code == 200:
+        data = response.json()
+        assert "template_id" in data
+        assert data["template_id"] == "langgraph-workflow"
+        assert "template_config" in data

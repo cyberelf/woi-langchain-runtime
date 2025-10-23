@@ -101,3 +101,32 @@ class BaseManager(ABC):
             "status": "healthy" if self._initialized else "not_initialized", 
             "initialized": self._initialized,
         }
+
+
+class ToolsetServiceInterface(ABC):
+    """Abstract interface for toolset services.
+    
+    This interface defines the contract that all toolset service implementations
+    must follow, allowing the framework executor to interact with toolsets in a
+    consistent manner across different frameworks.
+    """
+    
+    @abstractmethod
+    def get_all_toolset_names(self) -> list[str]:
+        """Get all available toolset names.
+        
+        Returns:
+            List of toolset identifiers that can be used by agents.
+            Each name represents a toolset that can be requested when
+            configuring an agent.
+        """
+        pass
+    
+    @abstractmethod
+    async def shutdown(self) -> None:
+        """Shutdown the toolset service and cleanup resources.
+        
+        This method should be called when the service is no longer needed
+        to properly cleanup connections, clients, and other resources.
+        """
+        pass

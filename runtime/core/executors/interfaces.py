@@ -12,6 +12,7 @@ from datetime import datetime, UTC
 from pydantic import BaseModel, Field, computed_field
 
 from ..types import ChatMessage
+from ...domain.value_objects.template import TemplateInfo
 
 
 class ExecutionResult(BaseModel):
@@ -130,7 +131,7 @@ class AgentExecutorInterface(ABC):
         pass
     
     @abstractmethod
-    def get_supported_templates(self) -> list[dict[str, Any]]:
+    def get_supported_templates(self) -> list[TemplateInfo]:
         """Get list of supported templates."""
         pass
 
@@ -172,11 +173,11 @@ class FrameworkExecutorInterface(ABC):
         pass
 
     @abstractmethod
-    def get_templates(self) -> list[dict[str, Any]]:
+    def get_templates(self) -> list[TemplateInfo]:
         """Get available templates from this framework.
         
         Returns:
-            List of template information dictionaries
+            List of template information objects
         """
         pass
 

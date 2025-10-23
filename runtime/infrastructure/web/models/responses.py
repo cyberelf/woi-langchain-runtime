@@ -153,3 +153,20 @@ class ChatCompletionResponse(BaseModel):
 
 
 # ChatCompletionChunk removed - use StreamingChunk instead for OpenAI compatibility
+
+
+class ComposeAgentResponse(BaseModel):
+    """Response model for agent composition."""
+    
+    agent_id: str = Field(..., description="Suggested agent ID")
+    name: str = Field(..., description="Suggested agent name")
+    description: str = Field(..., description="Suggested agent description")
+    template_id: str = Field(..., description="Template ID used")
+    template_version_id: str = Field("1.0.0", description="Template version")
+    system_prompt: str = Field(..., description="Generated system prompt")
+    template_config: dict[str, Any] = Field(..., description="Generated template configuration")
+    toolsets: list[str] = Field(default_factory=list, description="Recommended toolsets")
+    llm_config_id: str = Field(..., description="LLM configuration ID")
+    reasoning: Optional[str] = Field(None, description="Explanation of composition decisions")
+    
+    model_config = ConfigDict(extra="forbid")

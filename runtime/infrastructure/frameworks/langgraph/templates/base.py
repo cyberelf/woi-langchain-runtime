@@ -503,11 +503,9 @@ class BaseLangGraphAgent(ABC, Generic[ConfigSchemaType]):
         # Get the standard Pydantic JSON schema
         pydantic_schema = cls.config_schema.model_json_schema()
         
-        # Convert to ConfigField domain objects
-        config_fields = []
-        properties = pydantic_schema.get("properties", {})
-        
-        for field_key, field_info in properties.items():
+        # Helper to recursively convert JSON schema field to ConfigField
+        def convert_field(field_key: str, field_info: dict) -> ConfigField:
+            """Convert a JSON schema field definition to ConfigField, handling nested types."""
             # Extract field type
             field_type = field_info.get("type", "string")
             
@@ -530,15 +528,58 @@ class BaseLangGraphAgent(ABC, Generic[ConfigSchemaType]):
             if validation_dict:
                 validation = ConfigFieldValidation.from_dict(validation_dict)
             
+            # Handle nested types
+            items = None
+            properties = None
+            
+            if field_type == "array":
+                # Handle array items (nested schema)
+                items_schema = field_info.get("items")
+                if items_schema and isinstance(items_schema, dict):
+                    # Recursively convert items schema
+                    # Use a placeholder key for the items field
+                    items = convert_field("items", items_schema)
+            
+            elif field_type == "object":
+                # Handle object properties (nested schemas)
+                properties_schema = field_info.get("properties")
+                if properties_schema and isinstance(properties_schema, dict):
+                    # Recursively convert each property
+                    properties = {}
+                    for prop_key, prop_schema in properties_schema.items():
+                        properties[prop_key] = convert_field(prop_key, prop_schema)
+            
+            # Handle $ref definitions (resolve from definitions in schema)
+            if "$ref" in field_info:
+                ref_path = field_info["$ref"]
+                # Extract definition name from #/$defs/DefinitionName
+                if ref_path.startswith("#/$defs/") or ref_path.startswith("#/definitions/"):
+                    def_name = ref_path.split("/")[-1]
+                    definitions = pydantic_schema.get("$defs") or pydantic_schema.get("definitions", {})
+                    if def_name in definitions:
+                        # Recursively process the referenced definition
+                        ref_schema = definitions[def_name]
+                        return convert_field(field_key, ref_schema)
+            
             # Create ConfigField domain object
             config_field = ConfigField(
                 key=field_key,
                 field_type=field_type,
                 description=field_info.get("description"),
                 default_value=field_info.get("default"),
-                validation=validation
+                validation=validation,
+                items=items,
+                properties=properties
             )
             
+            return config_field
+        
+        # Convert top-level properties to ConfigField domain objects
+        config_fields = []
+        properties = pydantic_schema.get("properties", {})
+        
+        for field_key, field_info in properties.items():
+            config_field = convert_field(field_key, field_info)
             config_fields.append(config_field)
         
         return config_fields
