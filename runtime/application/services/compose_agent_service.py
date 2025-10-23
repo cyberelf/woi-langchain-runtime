@@ -135,7 +135,8 @@ class ComposeAgentService:
         def render_field(field: ConfigField, indent: int = 0) -> str:
             pad = '  ' * indent
             lines = []
-            lines.append(f"{pad}- {field.key}: {field.description or 'No description'}")
+            optional_str = " (optional)" if field.optional else ""
+            lines.append(f"{pad}- {field.key}{optional_str}: {field.description or 'No description'}")
             lines.append(f"{pad}  Type: {field.field_type}")
             if field.default_value is not None:
                 lines.append(f"{pad}  Default: {repr(field.default_value)}")

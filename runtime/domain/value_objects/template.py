@@ -90,6 +90,7 @@ class ConfigField:
     description: Optional[str] = None
     default_value: Optional[Any] = None
     validation: Optional[ConfigFieldValidation] = None
+    optional: bool = False
 
     # Support nested types:
     # - For arrays, `items` describes the schema of array elements (single ConfigField)
@@ -139,6 +140,9 @@ class ConfigField:
         if self.default_value is not None:
             result["default"] = self.default_value
 
+        if self.optional:
+            result["optional"] = True
+
         if self.validation is not None and self.validation.has_constraints():
             result["validation"] = self.validation.to_dict()
 
@@ -176,6 +180,7 @@ class ConfigField:
             description=data.get("description"),
             default_value=data.get("default"),
             validation=validation,
+            optional=data.get("optional", False),
             items=items,
             properties=properties,
         )

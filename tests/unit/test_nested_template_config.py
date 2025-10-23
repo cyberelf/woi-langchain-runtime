@@ -296,6 +296,55 @@ class TestNestedConfigField:
         assert reconstructed.items.properties is not None
         assert "tools" in reconstructed.items.properties
         assert reconstructed.items.properties["tools"].field_type == "array"
+    
+    def test_optional_field_serialization(self):
+        """Test that an optional field serializes with 'optional': True."""
+        field = ConfigField(
+            key="optional_field",
+            field_type="string",
+            optional=True
+        )
+        
+        result = field.to_dict()
+        
+        assert result["key"] == "optional_field"
+        assert result["optional"] is True
+    
+    def test_optional_field_deserialization(self):
+        """Test that an optional field deserializes correctly."""
+        data = {
+            "key": "optional_field",
+            "type": "string",
+            "optional": True
+        }
+        
+        field = ConfigField.from_dict(data)
+        
+        assert field.key == "optional_field"
+        assert field.optional is True
+        
+    def test_non_optional_field_serialization(self):
+        """Test that a non-optional field does not include 'optional' key."""
+        field = ConfigField(
+            key="required_field",
+            field_type="string",
+            optional=False
+        )
+        
+        result = field.to_dict()
+        
+        assert "optional" not in result
+        
+    def test_non_optional_field_deserialization(self):
+        """Test that a non-optional field deserializes with optional=False."""
+        data = {
+            "key": "required_field",
+            "type": "string"
+        }
+        
+        field = ConfigField.from_dict(data)
+        
+        assert field.optional is False
 
 
 class TestTemplateInfoWithNestedConfig:
@@ -463,3 +512,183 @@ class TestTemplateInfoWithNestedConfig:
         assert reconstructed.config_fields[0].items.field_type == "object"
         assert reconstructed.config_fields[0].items.properties is not None
         assert "field1" in reconstructed.config_fields[0].items.properties
+    
+    def test_template_info_serialization_with_optional_field(self):
+        """Test serialization of TemplateInfo with an optional config field."""
+        config_field = ConfigField(
+            key="optional_field",
+            field_type="string",
+            optional=True
+        )
+        
+        template = TemplateInfo(
+            id="test-template",
+            framework="langgraph",
+            name="Test Template",
+            description="A test template",
+            version="1.0.0",
+            config_fields=[config_field]
+        )
+        
+        result = template.to_dict()
+        
+        assert "config" in result
+        assert len(result["config"]) == 1
+        
+        field_dict = result["config"][0]
+        assert field_dict["key"] == "optional_field"
+        assert field_dict["type"] == "string"
+        assert "optional" in field_dict
+        assert field_dict["optional"] is True
+    
+    def test_template_info_deserialization_with_optional_field(self):
+        """Test deserialization of TemplateInfo with an optional config field."""
+        data = {
+            "id": "test-template",
+            "framework": "langgraph",
+            "name": "Test Template",
+            "description": "A test template",
+            "version": "1.0.0",
+            "config": [
+                {
+                    "key": "optional_field",
+                    "type": "string",
+                    "optional": True
+                }
+            ]
+        }
+        
+        template = TemplateInfo.from_dict(data)
+        
+        assert template.id == "test-template"
+        assert len(template.config_fields) == 1
+        
+        config_field = template.config_fields[0]
+        assert config_field.key == "optional_field"
+        assert config_field.field_type == "string"
+        assert config_field.optional is True
+    
+    def test_template_info_serialization_without_optional_field(self):
+        """Test serialization of TemplateInfo with a non-optional config field."""
+        config_field = ConfigField(
+            key="required_field",
+            field_type="string",
+            optional=False
+        )
+        
+        template = TemplateInfo(
+            id="test-template",
+            framework="langgraph",
+            name="Test Template",
+            description="A test template",
+            version="1.0.0",
+            config_fields=[config_field]
+        )
+        
+        result = template.to_dict()
+        
+        assert "config" in result
+        assert len(result["config"]) == 1
+        
+        field_dict = result["config"][0]
+        assert field_dict["key"] == "required_field"
+        assert field_dict["type"] == "string"
+        assert "optional" not in field_dict
+    
+    def test_template_info_deserialization_without_optional_field(self):
+        """Test deserialization of TemplateInfo with a non-optional config field."""
+        data = {
+            "id": "test-template",
+            "framework": "langgraph",
+            "name": "Test Template",
+            "description": "A test template",
+            "version": "1.0.0",
+            "config": [
+                {
+                    "key": "required_field",
+                    "type": "string"
+                }
+            ]
+        }
+        
+        template = TemplateInfo.from_dict(data)
+        
+        assert template.id == "test-template"
+        assert len(template.config_fields) == 1
+        
+        config_field = template.config_fields[0]
+        assert config_field.key == "required_field"
+        assert config_field.field_type == "string"
+        assert config_field.optional is False
+    
+    def test_config_field_with_array_of_atomic_types(self):
+        """Test serialization and deserialization of a field with an array of strings."""
+        field = ConfigField(
+            key="tags",
+            field_type="array",
+            items=ConfigField(key="items", field_type="string", optional=False),
+        )
+        field_dict = field.to_dict()
+        assert field_dict == {
+            "key": "tags",
+            "type": "array",
+            "items": {"key": "items", "type": "string"},
+        }
+        reconstructed_field = ConfigField.from_dict(field_dict)
+        assert reconstructed_field == field
+
+    def test_config_field_with_array_of_arrays(self):
+        """Test serialization and deserialization of a field with a nested array."""
+        field = ConfigField(
+            key="matrix",
+            field_type="array",
+            items=ConfigField(
+                key="items",
+                field_type="array",
+                optional=False,
+                items=ConfigField(key="items", field_type="integer", optional=False),
+            ),
+        )
+        field_dict = field.to_dict()
+        assert field_dict == {
+            "key": "matrix",
+            "type": "array",
+            "items": {
+                "key": "items",
+                "type": "array",
+                "items": {"key": "items", "type": "integer"},
+            },
+        }
+        reconstructed_field = ConfigField.from_dict(field_dict)
+        assert reconstructed_field == field
+
+    def test_config_field_with_array_of_objects(self):
+        """Test serialization and deserialization of a field with an array of objects."""
+        field = ConfigField(
+            key="users",
+            field_type="array",
+            items=ConfigField(
+                key="items",
+                field_type="object",
+                optional=False,
+                properties={
+                    "id": ConfigField(key="id", field_type="integer", optional=False),
+                    "name": ConfigField(key="name", field_type="string", optional=True),
+                },
+            ),
+        )
+        field_dict = field.to_dict()
+        assert field_dict == {
+            "key": "users",
+            "type": "array",
+            "items": {
+                "key": "items",
+                "type": "object",
+                "properties": {
+                    "id": {"key": "id", "type": "integer"},
+                    "name": {"key": "name", "type": "string", "optional": True},
+                },
+            },
+        }
+        reconstructed_field = ConfigField.from_dict(field_dict)
+        assert reconstructed_field == field

@@ -504,8 +504,19 @@ class BaseLangGraphAgent(ABC, Generic[ConfigSchemaType]):
         pydantic_schema = cls.config_schema.model_json_schema()
         
         # Helper to recursively convert JSON schema field to ConfigField
-        def convert_field(field_key: str, field_info: dict) -> ConfigField:
+        def convert_field(field_key: str, field_info: dict, parent_schema: dict) -> ConfigField:
             """Convert a JSON schema field definition to ConfigField, handling nested types."""
+            # Handle anyOf (e.g., Optional types that generate {"anyOf": [{"type": "array"}, {"type": "null"}]})
+            if "anyOf" in field_info:
+                # Find the non-null option
+                for option in field_info["anyOf"]:
+                    if option.get("type") != "null":
+                        # Use the non-null option as the field_info
+                        field_info = {**field_info, **option}
+                        # Remove anyOf now that we've resolved it
+                        field_info.pop("anyOf", None)
+                        break
+            
             # Extract field type
             field_type = field_info.get("type", "string")
             
@@ -537,8 +548,9 @@ class BaseLangGraphAgent(ABC, Generic[ConfigSchemaType]):
                 items_schema = field_info.get("items")
                 if items_schema and isinstance(items_schema, dict):
                     # Recursively convert items schema
-                    # Use a placeholder key for the items field
-                    items = convert_field("items", items_schema)
+                    # Use a placeholder key for the items field. The parent schema
+                    # for an item is the array schema itself (`field_info`).
+                    items = convert_field("items", items_schema, field_info)
             
             elif field_type == "object":
                 # Handle object properties (nested schemas)
@@ -547,7 +559,7 @@ class BaseLangGraphAgent(ABC, Generic[ConfigSchemaType]):
                     # Recursively convert each property
                     properties = {}
                     for prop_key, prop_schema in properties_schema.items():
-                        properties[prop_key] = convert_field(prop_key, prop_schema)
+                        properties[prop_key] = convert_field(prop_key, prop_schema, field_info)
             
             # Handle $ref definitions (resolve from definitions in schema)
             if "$ref" in field_info:
@@ -558,9 +570,21 @@ class BaseLangGraphAgent(ABC, Generic[ConfigSchemaType]):
                     definitions = pydantic_schema.get("$defs") or pydantic_schema.get("definitions", {})
                     if def_name in definitions:
                         # Recursively process the referenced definition
+                        # Pass the original parent_schema so the optional flag is checked correctly
+                        # against the parent's required list, not the referenced definition's.
                         ref_schema = definitions[def_name]
-                        return convert_field(field_key, ref_schema)
+                        return convert_field(field_key, ref_schema, parent_schema)
             
+            # The 'optional' flag is only relevant for properties of an object.
+            # For the item schema of an array (keyed as "items"), the concept of being
+            # optional is not meaningful, so we default it to False.
+            # We check if the parent's type is 'array' to correctly identify an item schema.
+            is_optional = (
+                field_key not in parent_schema.get("required", [])
+                if not (field_key == "items" and parent_schema.get("type") == "array")
+                else False
+            )
+
             # Create ConfigField domain object
             config_field = ConfigField(
                 key=field_key,
@@ -568,6 +592,7 @@ class BaseLangGraphAgent(ABC, Generic[ConfigSchemaType]):
                 description=field_info.get("description"),
                 default_value=field_info.get("default"),
                 validation=validation,
+                optional=is_optional,
                 items=items,
                 properties=properties
             )
@@ -579,7 +604,7 @@ class BaseLangGraphAgent(ABC, Generic[ConfigSchemaType]):
         properties = pydantic_schema.get("properties", {})
         
         for field_key, field_info in properties.items():
-            config_field = convert_field(field_key, field_info)
+            config_field = convert_field(field_key, field_info, pydantic_schema)
             config_fields.append(config_field)
         
         return config_fields
